@@ -401,6 +401,8 @@ class TestAnalysisMode(unittest.TestCase):
             "cpu_peak_count",
             "mem_avg",
             "mem_peak_count",
+            "mem_slope",
+            "mem_r_square",
             "flags",
         ]:
             self.assertIn(col, combined, f"Aggregated table should include column {col!r}")

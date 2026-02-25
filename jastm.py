@@ -1384,6 +1384,8 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         cpu_peak_count = len(analyzer.cpu_peaks)
         mem_avg = analyzer.avg_mem
         mem_peak_count = len(analyzer.memory_peaks)
+        mem_slope = analyzer.mem_trend_slope_per_hour
+        mem_r2 = analyzer.mem_trend_r2
 
         flags = []
         if cpu_peak_count > 0:
@@ -1400,6 +1402,8 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
             "cpu_peak_count": cpu_peak_count,
             "mem_avg": mem_avg,
             "mem_peak_count": mem_peak_count,
+            "mem_slope": mem_slope,
+            "mem_r2": mem_r2,
             "flags": flags_str,
             "source": path,
         })
@@ -1412,13 +1416,20 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     rows.sort(key=lambda r: (r["machine_id"], r["start_time"], r["source"]))
 
     print("\n=== Aggregated Summary Report ===")
-    print("| machine_id | start_time | duration(days and hours) | cpu_avg_% | cpu_peak_count | mem_avg | mem_peak_count | flags |")
-    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |")
+    print("| machine_id | start_time | duration(days and hours) | cpu_avg_% | cpu_peak_count | mem_avg | mem_peak_count | mem_slope | mem_r_square | flags |")
+    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for r in rows:
+        if r["mem_slope"] is None or r["mem_r2"] is None:
+            mem_slope_str = "NA"
+            mem_r2_str = "NA"
+        else:
+            mem_slope_str = f"{r['mem_slope']:.2f}"
+            mem_r2_str = f"{r['mem_r2']:.3f}"
         print(
             f"| {r['machine_id']} | {r['start_time']} | {r['duration']} | "
             f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
-            f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | {r['flags']} |"
+            f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | "
+            f"{mem_slope_str} | {mem_r2_str} | {r['flags']} |"
         )
     print()
 

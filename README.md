@@ -85,6 +85,8 @@ This prints a markdown table, one row per input CSV, with the following columns:
 - `cpu_peak_count`
 - `mem_avg`
 - `mem_peak_count`
+- `mem_slope`
+- `mem_r_square`
 - `flags`
 
 `machine_id` is inferred from a 4-digit token in the CSV filename when possible (for example, `node_1234_20231025_monitor.csv` → `1234`). If no such token is found, it falls back to the effective `--machine-id` value (from CLI, config, or the derived default).
