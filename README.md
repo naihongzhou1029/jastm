@@ -66,6 +66,29 @@ Analysis options:
 
 `--config-file` applies to both collection and analysis options; see **Config file (`config.yaml`)**.
 
+#### Aggregating multiple runs
+
+When you have soak logs from multiple machines (or multiple runs) and want a **single, human-readable overview**, use `--aggregate-summaries` with one or more CSV files:
+
+- **Aggregate across several CSV logs**:  
+  `python jastm.py --aggregate-summaries machineA_20231025_100000_monitor.csv machineB_20231025_110000_monitor.csv`
+
+- **With custom peak thresholds** (applied uniformly to all inputs):  
+  `python jastm.py --aggregate-summaries *.csv --cpu-peak-percentage 80 --ram-peak-percentage 40`
+
+This prints a markdown table, one row per input CSV, with the following columns:
+
+- `machine_id`
+- `start_time`
+- `duration(days and hours)`
+- `cpu_avg_%`
+- `cpu_peak_count`
+- `mem_avg`
+- `mem_peak_count`
+- `flags`
+
+`machine_id` is inferred from a 4-digit token in the CSV filename when possible (for example, `node_1234_20231025_monitor.csv` → `1234`). If no such token is found, it falls back to the effective `--machine-id` value (from CLI, config, or the derived default).
+
 ### Config file (`config.yaml`)
 
 - **Purpose**: Centralize default values and documentation for most CLI options.

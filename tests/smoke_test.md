@@ -73,6 +73,8 @@ Timestamp,CPU_Usage_%,Memory_MB
 | 4.4  | Analysis with no action | `python jastm.py --parse-file <path_to_sample.csv>` | Exit 0; message "Analysis mode selected but no action specified. Use --summary or --metrices-window." |
 | 4.5  | Missing/invalid file | `python jastm.py --parse-file nonexistent.csv --summary` | Exit 1; error about file load/failure |
 | 4.6  | Custom peak thresholds | `python jastm.py --parse-file <path_to_sample.csv> --summary --cpu-peak-percentage 50 --ram-peak-percentage 30` | Exit 0; summary reflects different peak detection (inspect output for peak tables) |
+| 4.7  | Aggregate summaries for multiple CSVs | `python jastm.py --aggregate-summaries <path_to_sample.csv> <another_sample.csv>` | Exit 0; prints a markdown table with columns `machine_id`, `start_time`, `duration(days and hours)`, `cpu_avg_%`, `cpu_peak_count`, `mem_avg`, `mem_peak_count`, `flags` |
+| 4.8  | Aggregate respects peak thresholds | `python jastm.py --aggregate-summaries <path_to_sample.csv> --cpu-peak-percentage 50 --ram-peak-percentage 30` | Exit 0; aggregate table printed; `cpu_peak_count`/`mem_peak_count` reflect thresholds consistently with single-run summaries |
 
 ---
 

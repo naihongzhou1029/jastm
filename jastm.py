@@ -7,6 +7,7 @@ Monitors CPU usage and system memory, displaying data in a live line chart.
 import argparse
 import csv
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -1173,6 +1174,8 @@ Examples:
     # Analysis Arguments
     parser.add_argument('--parse-file', type=str,
                            help='Input CSV file for analysis (switches to Analysis Mode)')
+    parser.add_argument('--aggregate-summaries', metavar='CSV', nargs='+',
+                       help='Aggregate summary table from multiple CSV log files (Analysis Mode only)')
     
     # Collection Arguments (Process identification)
     # Mutually exclusive group for process selection
@@ -1204,8 +1207,10 @@ Examples:
     
     args = parser.parse_args()
     
-    if args.parse_file and (args.process_name or args.process_id or args.program):
-        parser.error("Cannot specify process/program when in Analysis Mode (--parse-file)")
+    if (args.parse_file or args.aggregate_summaries) and (args.process_name or args.process_id or args.program):
+        parser.error("Cannot specify process/program when in Analysis Mode (--parse-file or --aggregate-summaries)")
+    if args.parse_file and args.aggregate_summaries:
+        parser.error("Cannot use --parse-file and --aggregate-summaries together")
         
     return args
 
@@ -1260,8 +1265,98 @@ def _derive_default_machine_id() -> str:
         return "0000"
 
 
+def _infer_machine_id_from_path(path: str, default_machine_id: str) -> str:
+    """
+    Infer a 4-digit machine ID from the CSV filename.
+    Falls back to default_machine_id if no suitable token is found.
+    """
+    base = os.path.basename(path)
+    # Look for a standalone 4-digit sequence in the filename
+    match = re.search(r'\b(\d{4})\b', base)
+    if match:
+        return match.group(1)
+    return default_machine_id
+
+
+def _format_duration_days_hours(duration_seconds: float) -> str:
+    """Format duration in 'Xd Yh' using whole days and hours."""
+    total_seconds = int(duration_seconds)
+    days = total_seconds // 86400
+    remaining = total_seconds % 86400
+    hours = remaining // 3600
+    return f"{days}d {hours}h"
+
+
+def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: float, default_machine_id: str) -> None:
+    """
+    Aggregate multiple CSV logs into a single markdown table for human review.
+
+    Columns: machine_id, start_time, duration(days and hours),
+    cpu_avg_%, cpu_peak_count, mem_avg, mem_peak_count, flags.
+    """
+    rows = []
+    for path in filepaths:
+        analyzer = DataAnalyzer(path, cpu_peak_criteria=cpu_peak_criteria, ram_peak_criteria=ram_peak_criteria)
+        if not analyzer.load_data():
+            print(f"Warning: Skipping file due to load error: {path}", file=sys.stderr)
+            continue
+
+        machine_id = _infer_machine_id_from_path(path, default_machine_id)
+
+        if analyzer.timestamps:
+            start_dt = analyzer.start_datetime + timedelta(seconds=analyzer.timestamps[0])
+        else:
+            start_dt = analyzer.start_datetime
+        start_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        duration_label = _format_duration_days_hours(analyzer.duration_seconds)
+
+        cpu_avg = analyzer.avg_cpu
+        cpu_peak_count = len(analyzer.cpu_peaks)
+        mem_avg = analyzer.avg_mem
+        mem_peak_count = len(analyzer.memory_peaks)
+
+        flags = []
+        if cpu_peak_count > 0:
+            flags.append("CPU_PEAKS")
+        if mem_peak_count > 0:
+            flags.append("MEM_PEAKS")
+        flags_str = ",".join(flags)
+
+        rows.append({
+            "machine_id": machine_id,
+            "start_time": start_str,
+            "duration": duration_label,
+            "cpu_avg": cpu_avg,
+            "cpu_peak_count": cpu_peak_count,
+            "mem_avg": mem_avg,
+            "mem_peak_count": mem_peak_count,
+            "flags": flags_str,
+            "source": path,
+        })
+
+    if not rows:
+        print("No valid data loaded for aggregation.")
+        return
+
+    # Stable ordering: by machine_id then start_time
+    rows.sort(key=lambda r: (r["machine_id"], r["start_time"], r["source"]))
+
+    print("\n=== Aggregated Summary Report ===")
+    print("| machine_id | start_time | duration(days and hours) | cpu_avg_% | cpu_peak_count | mem_avg | mem_peak_count | flags |")
+    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |")
+    for r in rows:
+        print(
+            f"| {r['machine_id']} | {r['start_time']} | {r['duration']} | "
+            f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
+            f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | {r['flags']} |"
+        )
+    print()
+
+
 def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict]) -> argparse.Namespace:
     """Merge CLI args with config file values and built-in defaults."""
+    is_analysis_mode = bool(args.parse_file or getattr(args, "aggregate_summaries", None))
     # Analysis thresholds
     cpu_peak_percentage = args.cpu_peak_percentage
     if cpu_peak_percentage is None:
@@ -1279,7 +1374,7 @@ def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict])
     sample_rate = args.sample_rate
     machine_id = args.machine_id
     
-    if not args.parse_file:
+    if not is_analysis_mode:
         # Only fall back to config when CLI did not select a process/program
         if process_name is None and process_id is None and program is None:
             cfg_proc_name = _get_config_option(config, "collection", "process_name")
@@ -1341,7 +1436,7 @@ def main():
         print("Error: --sample-rate must be a positive number", file=sys.stderr)
         sys.exit(2)
     
-    # Analysis Mode
+    # Analysis Mode - single file
     if args.parse_file:
         # Convert percentages to ratios
         cpu_peak_ratio = args.cpu_peak_percentage / 100.0
@@ -1359,6 +1454,18 @@ def main():
         if not args.summary and not args.metrices_window:
             print("Analysis mode selected but no action specified. Use --summary or --metrices-window.")
         
+        return
+
+    # Analysis Mode - aggregate multiple CSV logs
+    if getattr(args, "aggregate_summaries", None):
+        cpu_peak_ratio = args.cpu_peak_percentage / 100.0
+        ram_peak_ratio = args.ram_peak_percentage / 100.0
+        aggregate_summaries(
+            args.aggregate_summaries,
+            cpu_peak_criteria=cpu_peak_ratio,
+            ram_peak_criteria=ram_peak_ratio,
+            default_machine_id=args.machine_id,
+        )
         return
 
     # Data Collection Mode
