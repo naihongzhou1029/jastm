@@ -7,6 +7,7 @@ Monitors CPU usage and system memory, displaying data in a live line chart.
 import argparse
 import csv
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -14,6 +15,16 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+
+DEFAULT_SAMPLE_RATE = 1.0
+DEFAULT_CPU_PEAK_PERCENTAGE = 90.0
+DEFAULT_RAM_PEAK_PERCENTAGE = 50.0
 
 try:
     import psutil
@@ -1142,7 +1153,7 @@ class DataAnalyzer:
 def parse_arguments():
     """Parse and validate command-line arguments."""
     parser = argparse.ArgumentParser(
-        description='Robustness Monitor - Measure and Analyze System Performance.',
+        description='jastm - Just Another Soak Testing Monitor',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1172,33 +1183,129 @@ Examples:
                                help='Program command to launch and monitor (command and arguments)')
     
     # General Options
-    parser.add_argument('--sample-rate', type=float, default=1.0,
-                       help='Sampling interval in seconds (default: 1.0, Collection Mode only)')
+    parser.add_argument('--sample-rate', type=float,
+                       help=f'Sampling interval in seconds (default: {DEFAULT_SAMPLE_RATE}, Collection Mode only)')
+    parser.add_argument('--config-file', type=str,
+                       help='Path to YAML config file providing default option values')
     
     # Analysis Options
     parser.add_argument('--summary', action='store_true',
                        help='Show summary report (Analysis Mode only)')
     parser.add_argument('--metrices-window', action='store_true',
                        help='Open visualization tool (Analysis Mode only)')
-    parser.add_argument('--cpu-peak-percentage', type=float, default=90.0,
-                       help='Threshold percentage above average for CPU Peak detection (default: 90.0)')
-    parser.add_argument('--ram-peak-percentage', type=float, default=50.0,
-                       help='Threshold percentage below average for RAM Peak detection (0-100, default: 50.0)')
+    parser.add_argument('--cpu-peak-percentage', type=float,
+                       help=f'Threshold percentage above average for CPU Peak detection (default: {DEFAULT_CPU_PEAK_PERCENTAGE})')
+    parser.add_argument('--ram-peak-percentage', type=float,
+                       help=f'Threshold percentage below average for RAM Peak detection (0-100, default: {DEFAULT_RAM_PEAK_PERCENTAGE})')
     
     args = parser.parse_args()
     
-    if args.sample_rate <= 0:
-        parser.error("--sample-rate must be a positive number")
-        
     if args.parse_file and (args.process_name or args.process_id or args.program):
         parser.error("Cannot specify process/program when in Analysis Mode (--parse-file)")
         
     return args
 
 
+def _load_config_file(path: Optional[str]) -> Optional[dict]:
+    """Load YAML configuration file if provided."""
+    if not path:
+        return None
+    if yaml is None:
+        print("Error: PyYAML is required to use --config-file. Install it with: pip install pyyaml", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(path):
+        print(f"Error: Config file not found: {path}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        if not isinstance(data, dict):
+            print("Error: Config file must contain a YAML mapping at the top level.", file=sys.stderr)
+            sys.exit(1)
+        return data
+    except Exception as e:
+        print(f"Error: Failed to read config file {path}: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _get_config_option(config: Optional[dict], section: str, key: str):
+    """Retrieve option value from config, supporting either plain values or {value, ...} mappings."""
+    if not config:
+        return None
+    section_data = config.get(section)
+    if not isinstance(section_data, dict):
+        return None
+    raw = section_data.get(key)
+    if isinstance(raw, dict):
+        return raw.get("value")
+    return raw
+
+
+def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict]) -> argparse.Namespace:
+    """Merge CLI args with config file values and built-in defaults."""
+    # Analysis thresholds
+    cpu_peak_percentage = args.cpu_peak_percentage
+    if cpu_peak_percentage is None:
+        cfg_val = _get_config_option(config, "analysis", "cpu_peak_percentage")
+        cpu_peak_percentage = cfg_val if cfg_val is not None else DEFAULT_CPU_PEAK_PERCENTAGE
+    ram_peak_percentage = args.ram_peak_percentage
+    if ram_peak_percentage is None:
+        cfg_val = _get_config_option(config, "analysis", "ram_peak_percentage")
+        ram_peak_percentage = cfg_val if cfg_val is not None else DEFAULT_RAM_PEAK_PERCENTAGE
+    
+    # Collection-related options
+    process_name = args.process_name
+    process_id = args.process_id
+    program = args.program
+    sample_rate = args.sample_rate
+    
+    if not args.parse_file:
+        # Only fall back to config when CLI did not select a process/program
+        if process_name is None and process_id is None and program is None:
+            cfg_proc_name = _get_config_option(config, "collection", "process_name")
+            cfg_program = _get_config_option(config, "collection", "program")
+            count = sum(v is not None for v in (cfg_proc_name, cfg_program))
+            if count > 1:
+                print("Error: Config file must not specify more than one of collection.process_name or collection.program.", file=sys.stderr)
+                sys.exit(1)
+            if cfg_proc_name is not None:
+                process_name = str(cfg_proc_name)
+            elif cfg_program is not None:
+                if not isinstance(cfg_program, list):
+                    print("Error: 'collection.program.value' in config must be a YAML list of command and arguments.", file=sys.stderr)
+                    sys.exit(1)
+                program = [str(p) for p in cfg_program]
+        
+        if sample_rate is None:
+            cfg_rate = _get_config_option(config, "collection", "sample_rate")
+            sample_rate = cfg_rate if cfg_rate is not None else DEFAULT_SAMPLE_RATE
+    else:
+        # Analysis mode: collection sample-rate is not used, but keep a sane value
+        if sample_rate is None:
+            sample_rate = DEFAULT_SAMPLE_RATE
+    
+    merged = argparse.Namespace(**vars(args))
+    merged.process_name = process_name
+    merged.process_id = process_id
+    merged.program = program
+    merged.sample_rate = sample_rate
+    merged.cpu_peak_percentage = cpu_peak_percentage
+    merged.ram_peak_percentage = ram_peak_percentage
+    return merged
+
+
 def main():
     """Main entry point."""
     args = parse_arguments()
+    
+    # Merge config file with CLI options
+    config_data = _load_config_file(getattr(args, "config_file", None))
+    args = _resolve_effective_options(args, config_data)
+    
+    # Validate effective sample rate (only relevant for collection mode, but harmless elsewhere)
+    if args.sample_rate is not None and args.sample_rate <= 0:
+        print("Error: --sample-rate must be a positive number", file=sys.stderr)
+        sys.exit(2)
     
     # Analysis Mode
     if args.parse_file:

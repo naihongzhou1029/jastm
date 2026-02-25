@@ -16,7 +16,7 @@ Smoke tests based on [README.md](../README.md). Run these using `python` in an e
 
 | ID   | Description | Command | Expected |
 |------|-------------|---------|----------|
-| 1.1  | Help output | `python jastm.py --help` | Exit 0; usage, `--parse-file`, `--process-name`, `--process-id`, `--program`, `--sample-rate`, `--summary`, `--metrices-window`, `--cpu-peak-percentage`, `--ram-peak-percentage` visible |
+| 1.1  | Help output | `python jastm.py --help` | Exit 0; usage, `--parse-file`, `--process-name`, `--process-id`, `--program`, `--sample-rate`, `--config-file`, `--summary`, `--metrices-window`, `--cpu-peak-percentage`, `--ram-peak-percentage` visible |
 
 ---
 
@@ -30,6 +30,9 @@ Smoke tests based on [README.md](../README.md). Run these using `python` in an e
 | 2.4  | Reject analysis + process ID | `python jastm.py --parse-file x.csv --process-id 12345` | Exit non-zero; same as 2.3 |
 | 2.5  | Reject analysis + program | `python jastm.py --parse-file x.csv --program notepad.exe` | Exit non-zero; same as 2.3 |
 | 2.6  | Reject empty --program | `python jastm.py --program` | Exit non-zero; "Error: --program requires a command to execute" (or equivalent) |
+| 2.7  | Missing config file | `python jastm.py --config-file nonexistent.yaml` | Exit non-zero; error mentioning "Config file not found" (or equivalent) |
+| 2.8  | Invalid sample rate from config | Create a config file with `collection.sample_rate.value: 0`, then run `python jastm.py --config-file <that_config>` | Exit non-zero; error mentioning `--sample-rate` |
+| 2.9  | CLI overrides config thresholds | Use a config file that sets `analysis.cpu_peak_percentage.value` and `analysis.ram_peak_percentage.value`, then run `python jastm.py --parse-file <path_to_sample.csv> --summary --cpu-peak-percentage 50 --ram-peak-percentage 30 --config-file <that_config>` | Exit 0; summary reflects CLI-specified peak thresholds (config values ignored for those options) |
 
 ---
 
@@ -78,6 +81,15 @@ Timestamp,CPU_Usage_%,Memory_MB
 |------|-------------|---------|----------|
 | 5.1  | Launch and monitor | `python jastm.py --program <path_to_small_gui_or_cli_app> --sample-rate 1` | Program starts; monitor logs; exit 0 after program exit or manual stop. Skip on CI if no suitable test executable. |
 | 5.2  | Process exit stops collection | Run 3.2 or 3.3 targeting a process that exits during the run | Collection stops after up to 10 consecutive metric failures; CSV contains data up to that point |
+
+---
+
+## 6. Config file
+
+| ID   | Description | Command | Expected |
+|------|-------------|---------|----------|
+| 6.1  | Basic config usage | Prepare `config.yaml` (or another YAML file) as described in `README.md`, then run `python jastm.py --config-file config.yaml --sample-rate 0.5` | Exit 0 after manual stop; behavior matches 3.1 but driven by config defaults where applicable |
+| 6.2  | Analysis thresholds from config | Use a config file that sets `analysis.cpu_peak_percentage.value` and `analysis.ram_peak_percentage.value`, then run `python jastm.py --parse-file <path_to_sample.csv> --summary --config-file <that_config>` | Exit 0; summary reflects peak detection based on values from the config file |
 
 ---
 

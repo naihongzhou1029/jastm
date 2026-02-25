@@ -1,0 +1,41 @@
+#
+# jastm configuration file
+# This file provides default values and documentation for CLI options
+# that can be loaded via:  python jastm.py --config-file config.yaml
+#
+
+version: 1
+
+collection:
+  # Name of the process to monitor for data collection.
+  # Mutually exclusive with process_id and program.
+  process_name:
+    value: null
+    default: null
+
+  # Program command and arguments to launch and monitor for data collection.
+  # Represented as a YAML list of strings, for example:
+  # ["myapp.exe", "--flag", "value"].
+  program:
+    value: null
+    default: null
+
+  # Sampling interval in seconds for data collection.
+  # Must be a positive number.
+  sample_rate:
+    value: 1.0
+    default: 1.0
+
+analysis:
+  # CPU peak threshold percentage above average.
+  # For example, 90.0 means a CPU peak is any sample above 1.9x the average CPU.
+  cpu_peak_percentage:
+    value: 90.0
+    default: 90.0
+
+  # RAM peak threshold percentage below average available memory (0–100).
+  # For example, 50.0 means a memory peak is any sample below 0.5x the average available memory.
+  ram_peak_percentage:
+    value: 50.0
+    default: 50.0
+
