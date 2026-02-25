@@ -16,7 +16,7 @@ Smoke tests based on [README.md](../README.md). Run these using `python` in an e
 
 | ID   | Description | Command | Expected |
 |------|-------------|---------|----------|
-| 1.1  | Help output | `python jastm.py --help` | Exit 0; usage, `--parse-file`, `--process-name`, `--process-id`, `--program`, `--sample-rate`, `--config-file`, `--summary`, `--metrices-window`, `--cpu-peak-percentage`, `--ram-peak-percentage` visible |
+| 1.1  | Help output | `python jastm.py --help` | Exit 0; usage, `--parse-file`, `--process-name`, `--process-id`, `--program`, `--sample-rate`, `--machine-id`, `--config-file`, `--summary`, `--metrices-window`, `--cpu-peak-percentage`, `--ram-peak-percentage` visible |
 
 ---
 
@@ -46,6 +46,7 @@ Use short runs (e.g. a few samples) and optional early exit (e.g. Ctrl+C or proc
 | 3.2  | Process name filter | `python jastm.py --process-name "python.exe" --sample-rate 0.5` | Same as 3.1; log filename includes process name (e.g. `python_…_monitor.csv`) |
 | 3.3  | PID filter | `python jastm.py --process-id <current_python_pid> --sample-rate 0.5` | Same as 3.1; log filename includes `PID<id>` (e.g. `PID12345_…_monitor.csv`). Use a known-running process PID. |
 | 3.4  | CSV format | Inspect CSV from 3.1 | Header: `Timestamp`, `CPU_Usage_%`, `Memory_MB`. Timestamp ISO `YYYY-MM-DD HH:MM:SS`; CPU float; Memory_MB float (e.g. 2 decimals) |
+| 3.5  | Machine ID default | `python jastm.py --sample-rate 0.5` | Exit 0 after manual stop; console output includes a line `Machine ID: XXXX` where `XXXX` is a 4-digit ID derived from the NIC MAC (implementation-specific) |
 
 ---
 
@@ -90,6 +91,8 @@ Timestamp,CPU_Usage_%,Memory_MB
 |------|-------------|---------|----------|
 | 6.1  | Basic config usage | Prepare `config.yaml` (or another YAML file) as described in `README.md`, then run `python jastm.py --config-file config.yaml --sample-rate 0.5` | Exit 0 after manual stop; behavior matches 3.1 but driven by config defaults where applicable |
 | 6.2  | Analysis thresholds from config | Use a config file that sets `analysis.cpu_peak_percentage.value` and `analysis.ram_peak_percentage.value`, then run `python jastm.py --parse-file <path_to_sample.csv> --summary --config-file <that_config>` | Exit 0; summary reflects peak detection based on values from the config file |
+| 6.3  | Machine ID from config | Use a config file that sets `collection.machine_id.value` (e.g. `"9999"`), then run `python jastm.py --config-file <that_config> --sample-rate 0.5` | Exit 0 after manual stop; console output includes `Machine ID: 9999` (config value used instead of derived default) |
+| 6.4  | CLI overrides machine ID from config | Use a config file that sets `collection.machine_id.value` to one value, then run `python jastm.py --config-file <that_config> --machine-id 1234 --sample-rate 0.5` | Exit 0 after manual stop; console output includes `Machine ID: 1234` (CLI value overrides config) |
 
 ---
 

@@ -26,6 +26,12 @@ collection:
     value: 1.0
     default: 1.0
 
+  # 4-digit machine identifier for this host.
+  # If null, a default ID is derived from the NIC MAC address.
+  machine_id:
+    value: null
+    default: null
+
 analysis:
   # CPU peak threshold percentage above average.
   # For example, 90.0 means a CPU peak is any sample above 1.9x the average CPU.

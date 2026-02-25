@@ -42,6 +42,7 @@ Options:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--sample-rate` | Sampling interval in seconds | `1.0` |
+| `--machine-id` | 4-digit identifier for this machine; if omitted, a 4-digit ID is derived from the NIC MAC address | Derived from NIC MAC (4 digits) |
 | `--config-file` | Path to YAML config file providing default values for supported options | *(none)* |
 
 Log file is created automatically, using the pattern: `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv` (for example, `chrome_PID1234_20231025_100000_monitor.csv`). The log contains these columns: `Timestamp`, `CPU_Usage_%`, and `Memory_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
@@ -73,7 +74,7 @@ Analysis options:
   - Command-line arguments **override** values from `config.yaml`.
   - `config.yaml` values override built-in defaults.
 - **Config-managed options**:
-  - Collection: `process_name`, `program`, `sample_rate`
+  - Collection: `process_name`, `program`, `sample_rate`, `machine_id`
   - Analysis: `cpu_peak_percentage`, `ram_peak_percentage`
 - **CLI-only options (not stored in config)**:
   - `--parse-file`
@@ -108,6 +109,12 @@ collection:
   sample_rate:
     value: 1.0
     default: 1.0
+
+  # 4-digit machine identifier for this host.
+  # If null, a default ID is derived from the NIC MAC address.
+  machine_id:
+    value: null
+    default: null
 
 analysis:
   # CPU peak threshold percentage above average.
