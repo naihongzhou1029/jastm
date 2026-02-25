@@ -760,6 +760,10 @@ class DataAnalyzer:
         self.avg_cpu = 0.0
         self.avg_mem = 0.0
         self.duration_seconds = 0.0
+        # Linear trend of available memory over time (for leak-risk assessment)
+        # Slope is expressed in MB/hour to make long-run drift easier to interpret.
+        self.mem_trend_slope_per_hour: Optional[float] = None
+        self.mem_trend_r2: Optional[float] = None
         self.cpu_peaks = []
         self.memory_peaks = []
         # self.peaks = [] # Deprecated
@@ -871,11 +875,65 @@ class DataAnalyzer:
             # Or remove self.peaks usage entirely in favor of specific lists.
             # I will remove self.peaks and update plotting code.
             
+            # Compute memory trend (linear regression) for leak-risk assessment
+            self._compute_memory_trend()
+            
             return True
             
         except Exception as e:
             print(f"Error reading file: {e}", file=sys.stderr)
             return False
+
+    def _compute_memory_trend(self) -> None:
+        """
+        Compute linear regression of available memory over elapsed time.
+        Results:
+          - mem_trend_slope_per_hour: slope in MB/hour (negative = memory decreasing over time)
+          - mem_trend_r2: coefficient of determination for the linear fit (0–1)
+        """
+        if not self.timestamps or not self.memory_data or len(self.timestamps) != len(self.memory_data):
+            self.mem_trend_slope_per_hour = None
+            self.mem_trend_r2 = None
+            return
+        n = len(self.timestamps)
+        if n < 2:
+            self.mem_trend_slope_per_hour = None
+            self.mem_trend_r2 = None
+            return
+
+        xs = self.timestamps
+        ys = self.memory_data
+
+        mean_x = sum(xs) / n
+        mean_y = sum(ys) / n
+
+        sxx = 0.0
+        syy = 0.0
+        sxy = 0.0
+        for x, y in zip(xs, ys):
+            dx = x - mean_x
+            dy = y - mean_y
+            sxx += dx * dx
+            syy += dy * dy
+            sxy += dx * dy
+
+        if sxx <= 0.0 or syy <= 0.0:
+            # Degenerate data (e.g., constant timestamps or memory); treat as no trend.
+            self.mem_trend_slope_per_hour = None
+            self.mem_trend_r2 = None
+            return
+
+        slope_per_second = sxy / sxx
+        r2 = (sxy * sxy) / (sxx * syy)
+
+        # Numerical guardrails
+        if r2 < 0.0:
+            r2 = 0.0
+        elif r2 > 1.0:
+            r2 = 1.0
+
+        self.mem_trend_slope_per_hour = slope_per_second * 3600.0
+        self.mem_trend_r2 = r2
 
     def show_summary(self):
         """Print summary report."""
@@ -897,6 +955,17 @@ class DataAnalyzer:
             print(f"Time Period: {start_str} ~ {end_str}")
         print(f"CPU Stats: Avg={self.avg_cpu:.2f}% | Min={min_cpu:.2f}% | Max={max_cpu:.2f}%")
         print(f"Memory Stats: Avg={self.avg_mem:.2f} MB | Min={min_mem:.2f} MB | Max={max_mem:.2f} MB")
+        if self.mem_trend_slope_per_hour is not None and self.mem_trend_r2 is not None:
+            if self.mem_trend_slope_per_hour < 0:
+                direction = "decreasing"
+            elif self.mem_trend_slope_per_hour > 0:
+                direction = "increasing"
+            else:
+                direction = "flat"
+            print(
+                f"Memory Trend: slope={self.mem_trend_slope_per_hour:.2f} MB/hour | "
+                f"R^2={self.mem_trend_r2:.3f} ({direction})"
+            )
         
         print(f"\n### Peaks Report (CPU > {self.cpu_peak_criteria*100:.0f}%, RAM < {self.ram_peak_criteria*100:.0f}% deviation)")
         

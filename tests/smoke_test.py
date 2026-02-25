@@ -336,6 +336,10 @@ class TestAnalysisMode(unittest.TestCase):
         self.assertIn("Time Period", combined)
         self.assertIn("CPU", combined)
         self.assertIn("Memory", combined)
+        # Memory trend (linear regression) should be reported for leak-risk analysis
+        self.assertIn("Memory Trend:", combined)
+        self.assertIn("MB/hour", combined)
+        self.assertIn("R^2=", combined)
 
     def test_4_2_metrics_window_only(self):
         """Exit 0; chart opens without crash (run with short timeout then terminate)."""

@@ -172,7 +172,8 @@ analysis:
 - **Peak detection**:
   - **CPU peak**: Sample where `CPU_Usage_% > avg_cpu * (1 + cpu_peak_percentage/100)`.
   - **Memory peak**: Sample where `Memory_MB < avg_memory * (1 - ram_peak_percentage/100)` (low available RAM).
- - **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, followed by markdown tables listing CPU peaks and memory peaks (timestamp, CPU %, memory MB).  
+- **Memory trend (R² & slope)**: Linear regression of `Memory_MB` over elapsed time is computed to show a **slope in MB/hour** and an **R-squared index** (`R^2`) indicating how well a linear trend explains memory behavior (negative slope with high `R^2` can indicate leak risk; tune your own thresholds per system).  
+- **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, a memory trend line with slope and `R^2`, followed by markdown tables listing CPU peaks and memory peaks (timestamp, CPU %, memory MB).  
   ```
   Duration: 00:00:05 (5 seconds)
   Time Period: 2023-10-25 10:00:00 ~ 2023-10-25 10:00:05
@@ -186,6 +187,7 @@ analysis:
     Min: 1800.00
     Max: 2100.00
     Avg: 1980.15
+    Trend: slope=-34740.00 MB/hour | R^2=0.018 (decreasing)
 
   | CPU Peak Time        | CPU % | Memory MB |
   |---------------------|-------|-----------|
