@@ -875,6 +875,12 @@ class DataAnalyzer:
         
         print("\n=== Summary Report ===")
         print(f"Duration: {hours:.2f} hours = {days:.2f} days")
+        if self.timestamps:
+            start_dt = self.start_datetime + timedelta(seconds=self.timestamps[0])
+            end_dt = self.start_datetime + timedelta(seconds=self.timestamps[-1])
+            start_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+            end_str = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"Time Period: {start_str} ~ {end_str}")
         print(f"CPU Stats: Avg={self.avg_cpu:.2f}% | Min={min_cpu:.2f}% | Max={max_cpu:.2f}%")
         print(f"Memory Stats: Avg={self.avg_mem:.2f} MB | Min={min_mem:.2f} MB | Max={max_mem:.2f} MB")
         

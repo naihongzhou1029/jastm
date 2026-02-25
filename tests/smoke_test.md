@@ -63,7 +63,7 @@ Timestamp,CPU_Usage_%,Memory_MB
 
 | ID   | Description | Command | Expected |
 |------|-------------|---------|----------|
-| 4.1  | Summary only | `python jastm.py --parse-file <path_to_sample.csv> --summary` | Exit 0; duration; min/max/avg CPU and memory; tables for CPU peaks and memory peaks (if any) |
+| 4.1  | Summary only | `python jastm.py --parse-file <path_to_sample.csv> --summary` | Exit 0; duration; time period; min/max/avg CPU and memory; tables for CPU peaks and memory peaks (if any) |
 | 4.2  | Metrics window only | `python jastm.py --parse-file <path_to_sample.csv> --metrices-window` | Exit 0; interactive chart opens (manual close); no crash |
 | 4.3  | Summary + metrics window | `python jastm.py --parse-file <path_to_sample.csv> --summary --metrices-window` | Exit 0; summary printed; then chart opens |
 | 4.4  | Analysis with no action | `python jastm.py --parse-file <path_to_sample.csv>` | Exit 0; message "Analysis mode selected but no action specified. Use --summary or --metrices-window." |

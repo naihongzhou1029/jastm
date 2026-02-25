@@ -212,6 +212,7 @@ class TestAnalysisMode(unittest.TestCase):
         self.assertEqual(code, 0, err or out)
         combined = out + err
         self.assertIn("Duration", combined)
+        self.assertIn("Time Period", combined)
         self.assertIn("CPU", combined)
         self.assertIn("Memory", combined)
 

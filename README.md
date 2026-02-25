@@ -81,9 +81,10 @@ Analysis options:
 - **Peak detection**:
   - **CPU peak**: Sample where `CPU_Usage_% > avg_cpu * (1 + cpu_peak_percentage/100)`.
   - **Memory peak**: Sample where `Memory_MB < avg_memory * (1 - ram_peak_percentage/100)` (low available RAM).
-- **Summary output example**: Display includes total duration, minimum/maximum/average CPU and memory, followed by markdown tables listing CPU peaks and memory peaks (timestamp, CPU %, memory MB).  
+ - **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, followed by markdown tables listing CPU peaks and memory peaks (timestamp, CPU %, memory MB).  
   ```
   Duration: 00:00:05 (5 seconds)
+  Time Period: 2023-10-25 10:00:00 ~ 2023-10-25 10:00:05
 
   CPU Usage (%):
     Min: 5.5
