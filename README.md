@@ -7,6 +7,12 @@ Just Another Soak Testing Monitor — real-time system monitoring and post-run a
 - **Data Collection Mode**: Samples CPU and memory at a configurable interval, optionally scoped to a process (by name, PID, or launched program). Writes a CSV log and supports an optional in-process GUI for live charts.
 - **Analysis Mode**: Loads a collected CSV, computes statistics and peak detection, and optionally shows a summary report and/or an interactive metrics chart.
 
+## Project structure
+
+- `jastm.py`: Main CLI entrypoint and implementation of data collection and analysis.
+- `README.md`: Usage guide and high-level documentation.
+- `tests/`: Manual and future automated tests (for example, `smoke_test.md`).
+
 ## Requirements
 
 - **Python**: 3.x
