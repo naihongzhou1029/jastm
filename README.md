@@ -144,8 +144,8 @@ collection:
     default: null
 
 analysis:
-  # CPU peak threshold percentage above average.
-  # For example, 90.0 means a CPU peak is any sample above 1.9x the average CPU.
+  # CPU peak absolute percentage threshold.
+  # For example, 90.0 means a CPU peak is any sample above 90.0% CPU usage.
   cpu_peak_percentage:
     value: 90.0
     default: 90.0
@@ -174,7 +174,7 @@ analysis:
 - **Duration**: From first to last timestamp in the CSV.
 - **Stats**: Min / max / average for CPU (%) and memory (MB).
 - **Peak detection**:
-  - **CPU peak**: Sample where `CPU_Usage_% > avg_cpu * (1 + cpu_peak_percentage/100)`.
+  - **CPU peak**: Sample where `CPU_Usage_% > cpu_peak_percentage`.
   - **Memory peak**: Sample where `Memory_MB < avg_memory * (1 - ram_peak_percentage/100)` (low available RAM).
 - **Memory trend (R² & slope)**: Linear regression of `Memory_MB` over elapsed time is computed to show a **slope in MB/hour** and an **R-squared index** (`R^2`) indicating how well a linear trend explains memory behavior (negative slope with high `R^2` can indicate leak risk; tune your own thresholds per system).  
 - **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, a memory trend line with slope and `R^2`, followed by markdown tables listing CPU peaks and memory peaks (timestamp, CPU %, memory MB).  

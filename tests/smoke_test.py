@@ -67,9 +67,9 @@ def _compute_expected_peaks_from_csv(csv_path: str, cpu_peak_percentage: float, 
         return 0, 0
     avg_cpu = sum(cpu_vals) / len(cpu_vals)
     avg_mem = sum(mem_vals) / len(mem_vals)
-    cpu_ratio = cpu_peak_percentage / 100.0
+    cpu_ratio = cpu_peak_percentage
     ram_ratio = ram_peak_percentage / 100.0
-    cpu_threshold = avg_cpu * (1.0 + cpu_ratio)
+    cpu_threshold = cpu_ratio
     mem_threshold = avg_mem * (1.0 - ram_ratio)
     cpu_count = sum(1 for c in cpu_vals if c > cpu_threshold)
     mem_count = sum(1 for m in mem_vals if m < mem_threshold)
@@ -124,11 +124,25 @@ def setUpModule():
     # Store the start time so we can clean up any CSVs created during tests
     global TEST_START_TIME
     TEST_START_TIME = time.time()
+    
+    # Temporarily move config.yaml so it doesn't affect tests that expect default behavior
+    cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
+    bak_path = os.path.join(PROJECT_ROOT, "config.yaml.bak")
+    if os.path.exists(cfg_path):
+        os.rename(cfg_path, bak_path)
 
 def tearDownModule():
     # Clean up any CSVs created during the tests
     if 'TEST_START_TIME' in globals():
         cleanup_monitor_csvs_created_after(PROJECT_ROOT, TEST_START_TIME - 1)
+        
+    # Restore config.yaml
+    cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
+    bak_path = os.path.join(PROJECT_ROOT, "config.yaml.bak")
+    if os.path.exists(bak_path):
+        if os.path.exists(cfg_path):
+            os.remove(cfg_path)
+        os.rename(bak_path, cfg_path)
 
 class TestHelpAndCLI(unittest.TestCase):
     """Spec section 1: Help and CLI."""

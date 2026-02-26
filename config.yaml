@@ -17,7 +17,7 @@ collection:
   # Represented as a YAML list of strings, for example:
   # ["myapp.exe", "--flag", "value"].
   program:
-    value: null
+    value: ["Golden HoYeah.exe"]
     default: null
 
   # Sampling interval in seconds for data collection.
@@ -33,15 +33,15 @@ collection:
     default: null
 
 analysis:
-  # CPU peak threshold percentage above average.
-  # For example, 90.0 means a CPU peak is any sample above 1.9x the average CPU.
+  # CPU peak absolute percentage threshold.
+  # For example, 90.0 means a CPU peak is any sample above 90.0% CPU usage.
   cpu_peak_percentage:
-    value: 90.0
+    value: 300.0
     default: 90.0
 
   # RAM peak threshold percentage below average available memory (0–100).
   # For example, 50.0 means a memory peak is any sample below 0.5x the average available memory.
   ram_peak_percentage:
-    value: 50.0
+    value: 30.0
     default: 50.0
 

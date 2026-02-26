@@ -163,6 +163,12 @@ def main():
     # Pre-test cleanup
     clean_up_csvs()
     
+    # Temporarily move config.yaml so it doesn't affect tests that expect default behavior
+    cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
+    bak_path = os.path.join(PROJECT_ROOT, "config.yaml.bak")
+    if os.path.exists(cfg_path):
+        os.rename(cfg_path, bak_path)
+    
     try:
         results.append(path_1_system_wide())
         results.append(path_2_process_name())
@@ -186,6 +192,12 @@ def main():
                 os.remove(temp_cfg)
             except:
                 pass
+                
+        # Restore config.yaml
+        if os.path.exists(bak_path):
+            if os.path.exists(cfg_path):
+                os.remove(cfg_path)
+            os.rename(bak_path, cfg_path)
 
     sys.exit(0 if all_ok else 1)
 

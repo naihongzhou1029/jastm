@@ -753,7 +753,7 @@ class DataCollector:
 class DataAnalyzer:
     """Analyzes and validates the collected metrics log file."""
     
-    def __init__(self, filepath: str, cpu_peak_criteria: float = 0.9, ram_peak_criteria: float = 0.5):
+    def __init__(self, filepath: str, cpu_peak_criteria: float = 90.0, ram_peak_criteria: float = 0.5):
         self.filepath = filepath
         self.cpu_peak_criteria = cpu_peak_criteria
         self.ram_peak_criteria = ram_peak_criteria
@@ -854,10 +854,10 @@ class DataAnalyzer:
                 self.avg_mem = 0.0
             
             # Identify peaks
-            # CPU: High Usage -> Value > Avg * (1 + Criteria)
+            # CPU: High Usage -> Value > Absolute Percentage Criteria
             # Memory (Available): Low Availability -> Value < Avg * (1 - Criteria)
             
-            cpu_threshold = self.avg_cpu * (1.0 + self.cpu_peak_criteria)
+            cpu_threshold = self.cpu_peak_criteria
             mem_threshold = self.avg_mem * (1.0 - self.ram_peak_criteria)
             
             self.cpu_peaks = []
@@ -970,9 +970,9 @@ class DataAnalyzer:
                 f"R^2={self.mem_trend_r2:.3f} ({direction})"
             )
         
-        print(f"\n### Peaks Report (CPU > {self.cpu_peak_criteria*100:.0f}%, RAM < {self.ram_peak_criteria*100:.0f}% deviation)")
+        print(f"\n### Peaks Report (CPU > {self.cpu_peak_criteria:.0f}%, RAM < {self.ram_peak_criteria*100:.0f}% deviation)")
         
-        cpu_thresh_val = self.avg_cpu * (1+self.cpu_peak_criteria)
+        cpu_thresh_val = self.cpu_peak_criteria
         print(f"\n#### CPU Peaks (> {cpu_thresh_val:.2f}%)")
         if not self.cpu_peaks:
             print("No cpu peaks detected.")
@@ -1512,7 +1512,13 @@ def main():
     args = parse_arguments()
     
     # Merge config file with CLI options
-    config_data = _load_config_file(getattr(args, "config_file", None))
+    config_file = getattr(args, "config_file", None)
+    if config_file is None:
+        default_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+        if os.path.isfile(default_config):
+            config_file = default_config
+            
+    config_data = _load_config_file(config_file)
     args = _resolve_effective_options(args, config_data)
     
     # Validate effective sample rate (only relevant for collection mode, but harmless elsewhere)
@@ -1520,12 +1526,12 @@ def main():
         print("Error: --sample-rate must be a positive number", file=sys.stderr)
         sys.exit(2)
     
+    # Convert RAM percentage to ratio
+    ram_peak_ratio = args.ram_peak_percentage / 100.0
+    
     # Analysis Mode - single file
     if args.parse_file:
-        # Convert percentages to ratios
-        cpu_peak_ratio = args.cpu_peak_percentage / 100.0
-        ram_peak_ratio = args.ram_peak_percentage / 100.0
-        analyzer = DataAnalyzer(args.parse_file, cpu_peak_criteria=cpu_peak_ratio, ram_peak_criteria=ram_peak_ratio)
+        analyzer = DataAnalyzer(args.parse_file, cpu_peak_criteria=args.cpu_peak_percentage, ram_peak_criteria=ram_peak_ratio)
         if not analyzer.load_data():
             sys.exit(1)
             
@@ -1542,11 +1548,9 @@ def main():
 
     # Analysis Mode - aggregate multiple CSV logs
     if getattr(args, "aggregate_summaries", None):
-        cpu_peak_ratio = args.cpu_peak_percentage / 100.0
-        ram_peak_ratio = args.ram_peak_percentage / 100.0
         aggregate_summaries(
             args.aggregate_summaries,
-            cpu_peak_criteria=cpu_peak_ratio,
+            cpu_peak_criteria=args.cpu_peak_percentage,
             ram_peak_criteria=ram_peak_ratio,
             default_machine_id=args.machine_id,
         )
