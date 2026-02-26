@@ -11,7 +11,9 @@ Just Another Soak Testing Monitor — real-time system monitoring and post-run a
 
 - `jastm.py`: Main CLI entrypoint and implementation of data collection and analysis.
 - `README.md`: Usage guide and high-level documentation.
-- `tests/`: Manual and future automated tests (for example, `smoke_test.md`).
+- `tests/`: Automated test suite ensuring correctness of all features.
+  - `smoke_test.py`: Comprehensive test suite covering CLI parsing, validation, data collection, and post-run analysis.
+  - `happy_path.py`: High-level tests verifying core end-to-end user workflows.
 
 ## Requirements
 
@@ -203,3 +205,29 @@ analysis:
   (Peak rows show only samples exceeding peak thresholds. Tables may be empty if no peaks detected.)
 - **Metrics window**: Chart of elapsed time vs. scaled CPU (×20) and available memory (MB); scatter overlay for CPU (red) and memory (orange) peaks; zoom (scroll), hover (interpolated values), arrow-key cursor; average CPU and average memory labels on the right.
 ![The Metrics Window](images/matrices_window.png)
+
+## Testing
+
+JASTM includes an automated testing suite under the `tests/` directory to ensure all features work reliably without regressions.
+
+To run the tests:
+
+- **Happy Path Tests** (`tests/happy_path.py`): Verifies the core, end-to-end workflows (system-wide monitoring, process filtering, launching a program, generating summaries, aggregating multiple CSVs, and parsing config overrides). Run it via:
+  ```bash
+  python tests/happy_path.py
+  ```
+  *Tip: You can list all the testing items and their expected results by passing the `--list-items` flag:*
+  ```bash
+  python tests/happy_path.py --list-items
+  ```
+
+- **Smoke Tests** (`tests/smoke_test.py`): A comprehensive `unittest` suite that rigorously tests edge cases, parameter validation, process termination behaviors, and detailed output parsing. Run it via:
+  ```bash
+  python -m unittest tests.smoke_test -v
+  ```
+  *Tip: You can list all the testing items and their expected results by passing the `--list-items` flag:*
+  ```bash
+  python tests/smoke_test.py --list-items
+  ```
+
+Both test scripts automatically clean up any generated `*_monitor.csv` artifacts after execution to keep your directory tidy.

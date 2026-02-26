@@ -19,31 +19,34 @@ from collections import deque
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
+def _ensure_dependency(module_name: str, install_name: str):
+    try:
+        __import__(module_name)
+    except ImportError:
+        print(f"Missing dependency '{module_name}'. Attempting to install '{install_name}'...", file=sys.stderr)
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", install_name])
+            print(f"Successfully installed '{install_name}'.", file=sys.stderr)
+        except subprocess.CalledProcessError as e:
+            print(f"Error: Failed to install {install_name}. Please install it manually: pip install {install_name}", file=sys.stderr)
+            sys.exit(1)
 
+# Ensure required dependencies are installed before proceeding
+_ensure_dependency("psutil", "psutil")
+_ensure_dependency("matplotlib", "matplotlib")
+_ensure_dependency("yaml", "pyyaml")
+
+import psutil
+import matplotlib
+matplotlib.use('TkAgg')
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
+import yaml
 
 DEFAULT_SAMPLE_RATE = 1.0
 DEFAULT_CPU_PEAK_PERCENTAGE = 90.0
 DEFAULT_RAM_PEAK_PERCENTAGE = 50.0
-
-try:
-    import psutil
-except ImportError:
-    print("Error: psutil is required. Install it with: pip install psutil", file=sys.stderr)
-    sys.exit(1)
-
-try:
-    import matplotlib
-    matplotlib.use('TkAgg')
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-    from matplotlib.figure import Figure
-    import matplotlib.pyplot as plt
-except ImportError:
-    print("Error: matplotlib is required. Install it with: pip install matplotlib", file=sys.stderr)
-    sys.exit(1)
 
 try:
     import tkinter as tk
@@ -1274,6 +1277,10 @@ Examples:
     parser.add_argument('--ram-peak-percentage', type=float,
                        help=f'Threshold percentage below average for RAM Peak detection (0-100, default: {DEFAULT_RAM_PEAK_PERCENTAGE})')
     
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+    
     args = parser.parse_args()
     
     if (args.parse_file or args.aggregate_summaries) and (args.process_name or args.process_id or args.program):
@@ -1288,9 +1295,6 @@ def _load_config_file(path: Optional[str]) -> Optional[dict]:
     """Load YAML configuration file if provided."""
     if not path:
         return None
-    if yaml is None:
-        print("Error: PyYAML is required to use --config-file. Install it with: pip install pyyaml", file=sys.stderr)
-        sys.exit(1)
     if not os.path.exists(path):
         print(f"Error: Config file not found: {path}", file=sys.stderr)
         sys.exit(1)
