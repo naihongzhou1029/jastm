@@ -38,22 +38,23 @@ _ensure_dependency("yaml", "pyyaml")
 
 import psutil
 import matplotlib
-matplotlib.use('TkAgg')
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 import yaml
 
 DEFAULT_SAMPLE_RATE = 1.0
 DEFAULT_CPU_PEAK_PERCENTAGE = 90.0
 DEFAULT_RAM_PEAK_PERCENTAGE = 50.0
 
+# tkinter and the TkAgg matplotlib backend are optional; they are required only when
+# GUI window features (live monitoring or --metrices-window) are used.
 try:
     import tkinter as tk
     from tkinter import ttk
+    matplotlib.use('TkAgg')
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+    _TKINTER_AVAILABLE = True
 except ImportError:
-    print("Error: tkinter is required. It should be included with Python.", file=sys.stderr)
-    sys.exit(1)
+    _TKINTER_AVAILABLE = False
 
 
 class DataCollector:
@@ -91,18 +92,18 @@ class DataCollector:
         self.total_elapsed_time = 0.0
         
         # GUI components
-        self.root: Optional[tk.Tk] = None
+        self.root = None
         self.fig: Optional[Figure] = None
-        self.ax: Optional[plt.Axes] = None
-        self.canvas: Optional[FigureCanvasTkAgg] = None
+        self.ax = None
+        self.canvas = None
         self.cpu_line = None
         self.memory_line = None
         self.hover_line = None  # Vertical line for hover
         self.cpu_label = None  # Label for CPU value at hover
         self.memory_label = None  # Label for Memory value at hover
-        self.sample_rate_var: Optional[tk.StringVar] = None
-        self.sample_rate_entry: Optional[ttk.Entry] = None
-        self.x_scrollbar: Optional[ttk.Scale] = None
+        self.sample_rate_var = None
+        self.sample_rate_entry = None
+        self.x_scrollbar = None
         
         # X-axis interaction state
         self.auto_x = True  # When True, x-axis auto-fits incoming data
@@ -1539,6 +1540,15 @@ def main():
             analyzer.show_summary()
             
         if args.metrices_window:
+            if not _TKINTER_AVAILABLE:
+                print(
+                    "Error: '--metrices-window' requires the tkinter package, which is not available "
+                    "in this environment.\n"
+                    "Install it with: sudo apt-get install python3-tk  (Debian/Ubuntu)\n"
+                    "                 sudo dnf install python3-tkinter  (Fedora/RHEL)",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
             analyzer.show_metrics_window()
             
         if not args.summary and not args.metrices_window:
@@ -1613,6 +1623,17 @@ def main():
             print(f"Error launching program: {e}", file=sys.stderr)
             sys.exit(1)
     
+    # Live monitoring requires tkinter for its GUI window
+    if not _TKINTER_AVAILABLE:
+        print(
+            "Error: Live monitoring requires the tkinter package, which is not available "
+            "in this environment.\n"
+            "Install it with: sudo apt-get install python3-tk  (Debian/Ubuntu)\n"
+            "                 sudo dnf install python3-tkinter  (Fedora/RHEL)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     # Initialize Monitor (now DataCollector)
     app = DataCollector(
         process_name=process_name,

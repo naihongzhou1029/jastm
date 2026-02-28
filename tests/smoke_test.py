@@ -383,6 +383,28 @@ class TestAnalysisMode(unittest.TestCase):
         # Timeout or normal exit; we only require no crash (run_jastm returns)
         self.assertIn(code, (0, -1), "Process should exit or be terminated without crash")
 
+    def test_4_2b_metrices_window_no_tkinter(self):
+        """Exit 1 with a clear error when tkinter is absent and --metrices-window is requested."""
+        # Drive jastm inside a subprocess that poisons sys.modules so tkinter appears missing.
+        driver = textwrap.dedent(f"""\
+            import sys
+            # Simulate a missing tkinter by setting the relevant modules to None.
+            # Python raises ImportError when a module is set to None in sys.modules.
+            for _mod in ('tkinter', '_tkinter', 'tkinter.ttk'):
+                sys.modules[_mod] = None
+            import runpy
+            sys.argv = ['jastm.py', '--parse-file', {repr(SAMPLE_CSV)}, '--metrices-window']
+            runpy.run_path({repr(JASTM_PY)}, run_name='__main__')
+        """)
+        result = subprocess.run(
+            [sys.executable, '-c', driver],
+            capture_output=True, text=True, cwd=PROJECT_ROOT,
+        )
+        self.assertEqual(result.returncode, 1, "Should exit with code 1 when tkinter is missing")
+        combined = result.stdout + result.stderr
+        self.assertIn('tkinter', combined.lower(), "Error should mention tkinter")
+        self.assertIn('--metrices-window', combined, "Error should mention --metrices-window")
+
     def test_4_3_summary_and_metrics_window(self):
         """Summary printed then chart (timeout after 2s); no crash."""
         code, out, err = run_jastm(
