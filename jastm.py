@@ -9,6 +9,7 @@ import csv
 import os
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -38,21 +39,64 @@ _ensure_dependency("yaml", "pyyaml")
 
 import psutil
 import matplotlib
-matplotlib.use('TkAgg')
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
-import matplotlib.pyplot as plt
 import yaml
 
 DEFAULT_SAMPLE_RATE = 1.0
 DEFAULT_CPU_PEAK_PERCENTAGE = 90.0
 DEFAULT_RAM_PEAK_PERCENTAGE = 50.0
 
-try:
-    import tkinter as tk
-    from tkinter import ttk
-except ImportError:
-    print("Error: tkinter is required. It should be included with Python.", file=sys.stderr)
+
+def _ensure_tkinter():
+    """Ensure tkinter is available; attempt auto-install via system package manager."""
+    try:
+        import tkinter  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    import platform
+    system = platform.system()
+    print("Missing dependency 'tkinter'. Attempting to install automatically...", file=sys.stderr)
+
+    # Build a list of install commands to try in order
+    install_candidates = []
+
+    if system == "Linux":
+        # Detect available package manager
+        if shutil.which("apt-get"):
+            install_candidates.append(["apt-get", "install", "-y", "python3-tk"])
+            install_candidates.append(["sudo", "apt-get", "install", "-y", "python3-tk"])
+        if shutil.which("dnf"):
+            install_candidates.append(["dnf", "install", "-y", "python3-tkinter"])
+            install_candidates.append(["sudo", "dnf", "install", "-y", "python3-tkinter"])
+        if shutil.which("yum"):
+            install_candidates.append(["yum", "install", "-y", "python3-tkinter"])
+            install_candidates.append(["sudo", "yum", "install", "-y", "python3-tkinter"])
+        if shutil.which("pacman"):
+            install_candidates.append(["pacman", "-S", "--noconfirm", "tk"])
+            install_candidates.append(["sudo", "pacman", "-S", "--noconfirm", "tk"])
+    elif system == "Darwin":
+        if shutil.which("brew"):
+            major = sys.version_info.major
+            minor = sys.version_info.minor
+            install_candidates.append(["brew", "install", f"python-tk@{major}.{minor}"])
+            install_candidates.append(["brew", "install", "python-tk"])
+
+    for cmd in install_candidates:
+        try:
+            subprocess.check_call(cmd)
+            import tkinter  # noqa: F401
+            print("Successfully installed 'tkinter'.", file=sys.stderr)
+            return
+        except Exception:
+            continue
+
+    print(
+        "Error: tkinter is required for --metrices-window but could not be installed automatically.\n"
+        "Please install it manually and re-run.",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 
@@ -91,18 +135,18 @@ class DataCollector:
         self.total_elapsed_time = 0.0
         
         # GUI components
-        self.root: Optional[tk.Tk] = None
+        self.root = None
         self.fig: Optional[Figure] = None
-        self.ax: Optional[plt.Axes] = None
-        self.canvas: Optional[FigureCanvasTkAgg] = None
+        self.ax = None
+        self.canvas = None
         self.cpu_line = None
         self.memory_line = None
         self.hover_line = None  # Vertical line for hover
         self.cpu_label = None  # Label for CPU value at hover
         self.memory_label = None  # Label for Memory value at hover
-        self.sample_rate_var: Optional[tk.StringVar] = None
-        self.sample_rate_entry: Optional[ttk.Entry] = None
-        self.x_scrollbar: Optional[ttk.Scale] = None
+        self.sample_rate_var = None
+        self.sample_rate_entry = None
+        self.x_scrollbar = None
         
         # X-axis interaction state
         self.auto_x = True  # When True, x-axis auto-fits incoming data
@@ -1000,6 +1044,11 @@ class DataAnalyzer:
 
     def show_metrics_window(self):
         """Launch the visualization window."""
+        _ensure_tkinter()
+        matplotlib.use('TkAgg')
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+        import tkinter as tk
+
         self.root = tk.Tk()
         self.root.title("Robustness Monitor - Analysis Mode")
         self.root.geometry("1200x800")
@@ -1345,7 +1394,7 @@ def _infer_machine_id_from_path(path: str, default_machine_id: str) -> str:
     """
     base = os.path.basename(path)
     # Look for a standalone 4-digit sequence in the filename
-    match = re.search(r'\b(\d{4})\b', base)
+    match = re.search(r'(?<!\d)(\d{4})(?!\d)', base)
     if match:
         return match.group(1)
     return default_machine_id
@@ -1369,6 +1418,9 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     """
     rows = []
     for path in filepaths:
+        if not os.path.exists(path):
+            print(f"Error: File not found: {path}", file=sys.stderr)
+            sys.exit(1)
         analyzer = DataAnalyzer(path, cpu_peak_criteria=cpu_peak_criteria, ram_peak_criteria=ram_peak_criteria)
         if not analyzer.load_data():
             print(f"Warning: Skipping file due to load error: {path}", file=sys.stderr)
@@ -1525,7 +1577,15 @@ def main():
     if args.sample_rate is not None and args.sample_rate <= 0:
         print("Error: --sample-rate must be a positive number", file=sys.stderr)
         sys.exit(2)
-    
+
+    # Validate peak thresholds
+    if not (0 <= args.cpu_peak_percentage <= 100):
+        print(f"Error: --cpu-peak-percentage must be between 0 and 100, got {args.cpu_peak_percentage}", file=sys.stderr)
+        sys.exit(2)
+    if not (0 <= args.ram_peak_percentage <= 100):
+        print(f"Error: --ram-peak-percentage must be between 0 and 100, got {args.ram_peak_percentage}", file=sys.stderr)
+        sys.exit(2)
+
     # Convert RAM percentage to ratio
     ram_peak_ratio = args.ram_peak_percentage / 100.0
     
