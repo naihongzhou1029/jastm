@@ -1372,6 +1372,18 @@ def _get_config_option(config: Optional[dict], section: str, key: str):
     return raw
 
 
+def _get_nic_mac_string() -> Optional[str]:
+    """Return NIC MAC as 'xx:xx:xx:xx:xx:xx', or None if unavailable."""
+    try:
+        mac_int = uuid.getnode()
+        if isinstance(mac_int, int) and 0 <= mac_int < (1 << 48):
+            mac_bytes = mac_int.to_bytes(6, "big")
+            return ":".join(f"{b:02x}" for b in mac_bytes)
+    except Exception:
+        pass
+    return None
+
+
 def _derive_default_machine_id() -> str:
     """Derive a 4-digit machine ID from the NIC MAC address."""
     try:
@@ -1620,6 +1632,9 @@ def main():
     # Machine ID is resolved via CLI/config or derived from NIC MAC address
     if args.machine_id:
         print(f"Machine ID: {args.machine_id}")
+    nic_mac = _get_nic_mac_string()
+    if nic_mac is not None:
+        print(f"NIC MAC: {nic_mac}")
     # Handle --program option: launch the program and get its process name
     launched_process = None
     process_name = args.process_name
