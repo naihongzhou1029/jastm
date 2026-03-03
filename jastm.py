@@ -1273,6 +1273,67 @@ class DataAnalyzer:
         return idx - 1
 
 
+def _pick_executable_and_write_launcher():
+    """List executables in CWD, prompt the user to pick one, then write a launcher script."""
+    cwd = os.getcwd()
+
+    if sys.platform == 'win32':
+        exe_exts = {'.exe', '.bat', '.cmd', '.com'}
+        candidates = [
+            f for f in sorted(os.listdir(cwd))
+            if os.path.isfile(os.path.join(cwd, f))
+            and os.path.splitext(f)[1].lower() in exe_exts
+        ]
+    else:
+        candidates = [
+            f for f in sorted(os.listdir(cwd))
+            if os.path.isfile(os.path.join(cwd, f))
+            and os.access(os.path.join(cwd, f), os.X_OK)
+        ]
+
+    if not candidates:
+        print("No executable files found in the current directory.", file=sys.stderr)
+        sys.exit(1)
+
+    print("Select a program to monitor:")
+    for i, name in enumerate(candidates, 1):
+        print(f"  {i:>2}. {name}")
+
+    while True:
+        try:
+            raw = input("Enter number: ").strip()
+            idx = int(raw) - 1
+            if 0 <= idx < len(candidates):
+                chosen = candidates[idx]
+                break
+            print(f"Please enter a number between 1 and {len(candidates)}.")
+        except ValueError:
+            print("Invalid input. Please enter a number.")
+        except EOFError:
+            print("\nNo selection made.", file=sys.stderr)
+            sys.exit(1)
+
+    python_exe = sys.executable
+    script_path = os.path.abspath(sys.argv[0])
+
+    if sys.platform == 'win32':
+        launcher_name = 'run.bat'
+        content = f'@echo off\n"{python_exe}" "{script_path}" --program "{chosen}"\n'
+    else:
+        launcher_name = 'run.sh'
+        content = f'#!/bin/sh\n"{python_exe}" "{script_path}" --program "{chosen}"\n'
+
+    launcher_path = os.path.join(cwd, launcher_name)
+    with open(launcher_path, 'w') as f:
+        f.write(content)
+
+    if sys.platform != 'win32':
+        os.chmod(launcher_path, 0o755)
+
+    print(f"Created launcher: {launcher_path}")
+    sys.exit(0)
+
+
 def parse_arguments():
     """Parse and validate command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -1571,14 +1632,6 @@ def main():
         print("Error: --sample-rate must be a positive number", file=sys.stderr)
         sys.exit(2)
 
-    # Validate peak thresholds
-    if not (0 <= args.cpu_peak_percentage <= 100):
-        print(f"Error: --cpu-peak-percentage must be between 0 and 100, got {args.cpu_peak_percentage}", file=sys.stderr)
-        sys.exit(2)
-    if not (0 <= args.ram_peak_percentage <= 100):
-        print(f"Error: --ram-peak-percentage must be between 0 and 100, got {args.ram_peak_percentage}", file=sys.stderr)
-        sys.exit(2)
-
     # Convert RAM percentage to ratio
     ram_peak_ratio = args.ram_peak_percentage / 100.0
     
@@ -1623,8 +1676,7 @@ def main():
     
     if args.program is not None:
         if not args.program:
-            print("Error: --program requires a command to execute.", file=sys.stderr)
-            sys.exit(1)
+            _pick_executable_and_write_launcher()
         
         try:
             # Launch the program

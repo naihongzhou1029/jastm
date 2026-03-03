@@ -48,7 +48,7 @@ The entire application lives in a single file: `jastm.py`. There are no packages
 
 ```
 parse_arguments()
-  └─ _resolve_effective_options()   ← merges CLI + config.yaml values
+  └─ _resolve_effective_options()   ← merges CLI + config.ini values
        └─ main()
             ├─ DataCollector.run()         (collection mode)
             ├─ DataAnalyzer + show_summary()  (--parse-file --summary)
@@ -72,7 +72,18 @@ The flag is spelled `--metrices-window` (not `--metrics-window`) throughout the 
 
 - **CPU peak**: `sample > cpu_peak_percentage` (absolute %, default 90)
 - **Memory peak**: `sample < avg_mem * (1 - ram_peak_percentage / 100)` (deviation from average, default 50%)
-- Both thresholds are validated to [0, 100] in `main()`.
+- No range validation is applied — values outside [0, 100] are accepted (e.g. CPU > 100% on multi-core systems).
+
+### CSV format and log file naming
+
+Log files use the pattern `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv`.
+
+CSV columns: `Timestamp` (ISO `YYYY-MM-DD HH:MM:SS`), `CPU_Usage_%` (float), `Memory_MB` (float).
+
+- **CPU**: per-process CPU % when a process is targeted; system-wide CPU % otherwise. First sample after start may be 0 (priming).
+- **Memory**: system-wide **available** memory in MB (`psutil.virtual_memory().available`), not process RSS.
+
+Analysis also computes a linear regression of `Memory_MB` over elapsed time, reported as slope (MB/hour) and R² to indicate potential memory leaks.
 
 ### CLI mutual exclusions
 

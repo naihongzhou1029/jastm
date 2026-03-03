@@ -288,38 +288,6 @@ class TestOptionValidation(unittest.TestCase):
         code, _, err = run_jastm(["--process-name", "python", "--program", "echo", "hi"])
         self.assertNotEqual(code, 0)
 
-    def test_2_13_reject_cpu_peak_percentage_negative(self):
-        """--cpu-peak-percentage must not be negative."""
-        code, _, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--summary", "--cpu-peak-percentage", "-1"]
-        )
-        self.assertNotEqual(code, 0)
-        self.assertIn("--cpu-peak-percentage", err)
-
-    def test_2_14_reject_cpu_peak_percentage_above_100(self):
-        """--cpu-peak-percentage must not exceed 100."""
-        code, _, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--summary", "--cpu-peak-percentage", "101"]
-        )
-        self.assertNotEqual(code, 0)
-        self.assertIn("--cpu-peak-percentage", err)
-
-    def test_2_15_reject_ram_peak_percentage_negative(self):
-        """--ram-peak-percentage must not be negative."""
-        code, _, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--summary", "--ram-peak-percentage", "-1"]
-        )
-        self.assertNotEqual(code, 0)
-        self.assertIn("--ram-peak-percentage", err)
-
-    def test_2_16_reject_ram_peak_percentage_above_100(self):
-        """--ram-peak-percentage must not exceed 100."""
-        code, _, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--summary", "--ram-peak-percentage", "101"]
-        )
-        self.assertNotEqual(code, 0)
-        self.assertIn("--ram-peak-percentage", err)
-
     def test_2_17_reject_invalid_ini_config(self):
         """Config file with invalid INI syntax (no section headers) should yield non-zero exit."""
         cfg_path = _write_temp_config_ini("cpu_peak_percentage = 90\n")
