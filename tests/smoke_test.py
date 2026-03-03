@@ -50,10 +50,10 @@ REQUIRED_CLI_OPTIONS = [
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def _write_temp_config_yaml(body: str) -> str:
-    """Write a temporary YAML config file under tests/ and return its path."""
+def _write_temp_config_ini(body: str) -> str:
+    """Write a temporary INI config file under tests/ and return its path."""
     content = textwrap.dedent(body).lstrip()
-    fd, path = tempfile.mkstemp(suffix=".yaml", dir=TESTS_DIR)
+    fd, path = tempfile.mkstemp(suffix=".ini", dir=TESTS_DIR)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(content)
     return path
@@ -133,9 +133,9 @@ def cleanup_monitor_csvs_created_after(cwd, after_timestamp):
 def setUpModule():
     global TEST_START_TIME
     TEST_START_TIME = time.time()
-    # Temporarily move config.yaml so tests that expect default behaviour are not affected
-    cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
-    bak_path = os.path.join(PROJECT_ROOT, "config.yaml.bak")
+    # Temporarily move config.ini so tests that expect default behaviour are not affected
+    cfg_path = os.path.join(PROJECT_ROOT, "config.ini")
+    bak_path = os.path.join(PROJECT_ROOT, "config.ini.bak")
     if os.path.exists(cfg_path):
         os.rename(cfg_path, bak_path)
 
@@ -143,8 +143,8 @@ def setUpModule():
 def tearDownModule():
     if "TEST_START_TIME" in globals():
         cleanup_monitor_csvs_created_after(PROJECT_ROOT, TEST_START_TIME - 1)
-    cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
-    bak_path = os.path.join(PROJECT_ROOT, "config.yaml.bak")
+    cfg_path = os.path.join(PROJECT_ROOT, "config.ini")
+    bak_path = os.path.join(PROJECT_ROOT, "config.ini.bak")
     if os.path.exists(bak_path):
         if os.path.exists(cfg_path):
             os.remove(cfg_path)
@@ -215,20 +215,16 @@ class TestOptionValidation(unittest.TestCase):
 
     def test_2_7_missing_config_file(self):
         """Missing config file should yield non-zero exit and mention not found."""
-        code, _, err = run_jastm(["--config-file", "nonexistent.yaml"])
+        code, _, err = run_jastm(["--config-file", "nonexistent.ini"])
         self.assertNotEqual(code, 0)
         self.assertIn("Config file not found", err)
 
     def test_2_8_invalid_sample_rate_from_config(self):
         """Config with non-positive sample_rate should be rejected."""
-        cfg_path = _write_temp_config_yaml(
+        cfg_path = _write_temp_config_ini(
             """
-            version: 1
-
-            collection:
-              sample_rate:
-                value: 0
-                default: 1.0
+            [collection]
+            sample_rate = 0
             """
         )
         try:
@@ -243,17 +239,11 @@ class TestOptionValidation(unittest.TestCase):
 
     def test_2_9_cli_overrides_config_thresholds(self):
         """CLI peak thresholds should override config values."""
-        cfg_path = _write_temp_config_yaml(
+        cfg_path = _write_temp_config_ini(
             """
-            version: 1
-
-            analysis:
-              cpu_peak_percentage:
-                value: 10.0
-                default: 10.0
-              ram_peak_percentage:
-                value: 20.0
-                default: 20.0
+            [analysis]
+            cpu_peak_percentage = 10.0
+            ram_peak_percentage = 20.0
             """
         )
         try:
@@ -330,9 +320,9 @@ class TestOptionValidation(unittest.TestCase):
         self.assertNotEqual(code, 0)
         self.assertIn("--ram-peak-percentage", err)
 
-    def test_2_17_reject_invalid_yaml_config(self):
-        """Config file with invalid YAML syntax should yield non-zero exit."""
-        cfg_path = _write_temp_config_yaml(": invalid: [yaml")
+    def test_2_17_reject_invalid_ini_config(self):
+        """Config file with invalid INI syntax (no section headers) should yield non-zero exit."""
+        cfg_path = _write_temp_config_ini("cpu_peak_percentage = 90\n")
         try:
             code, _, err = run_jastm(["--config-file", cfg_path])
         finally:
@@ -342,36 +332,8 @@ class TestOptionValidation(unittest.TestCase):
                 pass
         self.assertNotEqual(code, 0)
         self.assertTrue(
-            "config" in err.lower() or "yaml" in err.lower() or "parse" in err.lower(),
-            f"Error should mention config or YAML; got: {err!r}",
-        )
-
-    def test_2_18_reject_config_with_process_name_and_program(self):
-        """Config with both process_name and program should be rejected."""
-        cfg_path = _write_temp_config_yaml(
-            """
-            version: 1
-
-            collection:
-              process_name:
-                value: "python"
-                default: null
-              program:
-                value: ["echo", "hi"]
-                default: null
-            """
-        )
-        try:
-            code, _, err = run_jastm(["--config-file", cfg_path])
-        finally:
-            try:
-                os.remove(cfg_path)
-            except OSError:
-                pass
-        self.assertNotEqual(code, 0)
-        self.assertTrue(
-            "process_name" in err or "program" in err,
-            f"Error should mention the conflicting config keys; got: {err!r}",
+            "config" in err.lower() or "parse" in err.lower(),
+            f"Error should mention config or parse; got: {err!r}",
         )
 
 
@@ -732,14 +694,10 @@ class TestOptionalAndConfig(unittest.TestCase):
 
     def test_6_1_basic_config_usage_for_collection(self):
         """Config-driven collection starts and produces a CSV log."""
-        cfg_path = _write_temp_config_yaml(
+        cfg_path = _write_temp_config_ini(
             """
-            version: 1
-
-            collection:
-              sample_rate:
-                value: 1.0
-                default: 1.0
+            [collection]
+            sample_rate = 1.0
             """
         )
         try:
@@ -751,26 +709,20 @@ class TestOptionalAndConfig(unittest.TestCase):
                 os.remove(cfg_path)
             except OSError:
                 pass
-        # 0 = natural exit; -15/15 = SIGTERM from our termination after timeout
-        self.assertIn(code, (0, -15, 15), f"Unexpected exit code: {code}")
+        # 0 = natural exit; -15/15 = SIGTERM (Unix); 1 = TerminateProcess (Windows)
+        self.assertIn(code, (0, 1, -15, 15), f"Unexpected exit code: {code}")
         csv_path = find_recent_monitor_csv(PROJECT_ROOT, within_seconds=30)
         self.assertIsNotNone(csv_path, "Expected a *_monitor.csv when using config-driven collection")
         if out:
             self.assertIn("Logging to:", out)
 
     def test_6_2_analysis_thresholds_from_config(self):
-        """Analysis thresholds from config.yaml apply when CLI does not override them."""
-        cfg_path = _write_temp_config_yaml(
+        """Analysis thresholds from config.ini apply when CLI does not override them."""
+        cfg_path = _write_temp_config_ini(
             """
-            version: 1
-
-            analysis:
-              cpu_peak_percentage:
-                value: 10.0
-                default: 10.0
-              ram_peak_percentage:
-                value: 20.0
-                default: 20.0
+            [analysis]
+            cpu_peak_percentage = 10.0
+            ram_peak_percentage = 20.0
             """
         )
         try:
@@ -789,17 +741,11 @@ class TestOptionalAndConfig(unittest.TestCase):
 
     def test_6_3_machine_id_from_config(self):
         """Machine ID should be taken from config when provided."""
-        cfg_path = _write_temp_config_yaml(
+        cfg_path = _write_temp_config_ini(
             """
-            version: 1
-
-            collection:
-              machine_id:
-                value: "9999"
-                default: null
-              sample_rate:
-                value: 0.5
-                default: 1.0
+            [collection]
+            machine_id = 9999
+            sample_rate = 0.5
             """
         )
         try:
@@ -814,17 +760,11 @@ class TestOptionalAndConfig(unittest.TestCase):
 
     def test_6_4_cli_overrides_machine_id_from_config(self):
         """CLI --machine-id should override machine_id from config."""
-        cfg_path = _write_temp_config_yaml(
+        cfg_path = _write_temp_config_ini(
             """
-            version: 1
-
-            collection:
-              machine_id:
-                value: "1111"
-                default: null
-              sample_rate:
-                value: 0.5
-                default: 1.0
+            [collection]
+            machine_id = 1111
+            sample_rate = 0.5
             """
         )
         try:
@@ -842,23 +782,19 @@ class TestOptionalAndConfig(unittest.TestCase):
         self.assertNotIn("1111", out)
 
     def test_6_5_auto_detect_config_from_script_dir(self):
-        """config.yaml in the script directory is auto-loaded when --config-file is not given."""
-        cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
+        """config.ini in the script directory is auto-loaded when --config-file is not given."""
+        cfg_path = os.path.join(PROJECT_ROOT, "config.ini")
         try:
             with open(cfg_path, "w") as f:
                 f.write(textwrap.dedent("""\
-                    version: 1
-
-                    analysis:
-                      cpu_peak_percentage:
-                        value: 55.0
-                        default: 55.0
+                    [analysis]
+                    cpu_peak_percentage = 55.0
                 """))
             code, out, err = run_jastm(["--parse-file", SAMPLE_CSV, "--summary"])
             self.assertEqual(code, 0, err or out)
             self.assertIn(
                 "CPU > 55%", out + err,
-                "Auto-detected config.yaml should apply cpu_peak_percentage=55",
+                "Auto-detected config.ini should apply cpu_peak_percentage=55",
             )
         finally:
             try:

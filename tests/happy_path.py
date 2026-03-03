@@ -155,9 +155,9 @@ def main():
     # Pre-test cleanup
     clean_up_csvs()
     
-    # Temporarily move config.yaml so it doesn't affect tests that expect default behavior
-    cfg_path = os.path.join(PROJECT_ROOT, "config.yaml")
-    bak_path = os.path.join(PROJECT_ROOT, "config.yaml.bak")
+    # Temporarily move config.ini so it doesn't affect tests that expect default behavior
+    cfg_path = os.path.join(PROJECT_ROOT, "config.ini")
+    bak_path = os.path.join(PROJECT_ROOT, "config.ini.bak")
     if os.path.exists(cfg_path):
         os.rename(cfg_path, bak_path)
     
@@ -178,14 +178,14 @@ def main():
     finally:
         # Post-test cleanup
         clean_up_csvs()
-        temp_cfg = os.path.join(PROJECT_ROOT, "temp_test_config.yaml")
+        temp_cfg = os.path.join(PROJECT_ROOT, "temp_test_config.ini")
         if os.path.exists(temp_cfg):
             try:
                 os.remove(temp_cfg)
             except:
                 pass
-                
-        # Restore config.yaml
+
+        # Restore config.ini
         if os.path.exists(bak_path):
             if os.path.exists(cfg_path):
                 os.remove(cfg_path)

@@ -5,6 +5,7 @@ Monitors CPU usage and system memory, displaying data in a live line chart.
 """
 
 import argparse
+import configparser
 import csv
 import os
 import re
@@ -35,12 +36,10 @@ def _ensure_dependency(module_name: str, install_name: str):
 # Ensure required dependencies are installed before proceeding
 _ensure_dependency("psutil", "psutil")
 _ensure_dependency("matplotlib", "matplotlib")
-_ensure_dependency("yaml", "pyyaml")
 
 import psutil
 import matplotlib
 from matplotlib.figure import Figure
-import yaml
 
 DEFAULT_SAMPLE_RATE = 1.0
 DEFAULT_CPU_PEAK_PERCENTAGE = 90.0
@@ -1314,7 +1313,7 @@ Examples:
     parser.add_argument('--machine-id', type=str,
                        help='4-digit machine identifier; default is derived from NIC MAC address')
     parser.add_argument('--config-file', type=str,
-                       help='Path to YAML config file providing default option values')
+                       help='Path to INI config file providing default option values')
     
     # Analysis Options
     parser.add_argument('--summary', action='store_true',
@@ -1341,35 +1340,33 @@ Examples:
 
 
 def _load_config_file(path: Optional[str]) -> Optional[dict]:
-    """Load YAML configuration file if provided."""
+    """Load INI configuration file if provided."""
     if not path:
         return None
     if not os.path.exists(path):
         print(f"Error: Config file not found: {path}", file=sys.stderr)
         sys.exit(1)
     try:
+        parser = configparser.ConfigParser()
         with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        if not isinstance(data, dict):
-            print("Error: Config file must contain a YAML mapping at the top level.", file=sys.stderr)
-            sys.exit(1)
-        return data
+            parser.read_file(f)
+        return {s: dict(parser[s]) for s in parser.sections()}
     except Exception as e:
-        print(f"Error: Failed to read config file {path}: {e}", file=sys.stderr)
+        print(f"Error: Failed to parse config file {path}: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def _get_config_option(config: Optional[dict], section: str, key: str):
-    """Retrieve option value from config, supporting either plain values or {value, ...} mappings."""
+    """Retrieve option value from INI config dict. Returns None for missing or empty values."""
     if not config:
         return None
     section_data = config.get(section)
     if not isinstance(section_data, dict):
         return None
-    raw = section_data.get(key)
-    if isinstance(raw, dict):
-        return raw.get("value")
-    return raw
+    val = section_data.get(key)
+    if val is None or str(val).strip() == "":
+        return None
+    return val
 
 
 def _get_nic_mac_string() -> Optional[str]:
@@ -1509,11 +1506,11 @@ def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict])
     cpu_peak_percentage = args.cpu_peak_percentage
     if cpu_peak_percentage is None:
         cfg_val = _get_config_option(config, "analysis", "cpu_peak_percentage")
-        cpu_peak_percentage = cfg_val if cfg_val is not None else DEFAULT_CPU_PEAK_PERCENTAGE
+        cpu_peak_percentage = float(cfg_val) if cfg_val is not None else DEFAULT_CPU_PEAK_PERCENTAGE
     ram_peak_percentage = args.ram_peak_percentage
     if ram_peak_percentage is None:
         cfg_val = _get_config_option(config, "analysis", "ram_peak_percentage")
-        ram_peak_percentage = cfg_val if cfg_val is not None else DEFAULT_RAM_PEAK_PERCENTAGE
+        ram_peak_percentage = float(cfg_val) if cfg_val is not None else DEFAULT_RAM_PEAK_PERCENTAGE
     
     # Collection-related options
     process_name = args.process_name
@@ -1523,25 +1520,9 @@ def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict])
     machine_id = args.machine_id
     
     if not is_analysis_mode:
-        # Only fall back to config when CLI did not select a process/program
-        if process_name is None and process_id is None and program is None:
-            cfg_proc_name = _get_config_option(config, "collection", "process_name")
-            cfg_program = _get_config_option(config, "collection", "program")
-            count = sum(v is not None for v in (cfg_proc_name, cfg_program))
-            if count > 1:
-                print("Error: Config file must not specify more than one of collection.process_name or collection.program.", file=sys.stderr)
-                sys.exit(1)
-            if cfg_proc_name is not None:
-                process_name = str(cfg_proc_name)
-            elif cfg_program is not None:
-                if not isinstance(cfg_program, list):
-                    print("Error: 'collection.program.value' in config must be a YAML list of command and arguments.", file=sys.stderr)
-                    sys.exit(1)
-                program = [str(p) for p in cfg_program]
-        
         if sample_rate is None:
             cfg_rate = _get_config_option(config, "collection", "sample_rate")
-            sample_rate = cfg_rate if cfg_rate is not None else DEFAULT_SAMPLE_RATE
+            sample_rate = float(cfg_rate) if cfg_rate is not None else DEFAULT_SAMPLE_RATE
         if machine_id is None:
             cfg_machine_id = _get_config_option(config, "collection", "machine_id")
             if cfg_machine_id is not None:
@@ -1578,7 +1559,7 @@ def main():
     # Merge config file with CLI options
     config_file = getattr(args, "config_file", None)
     if config_file is None:
-        default_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+        default_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")
         if os.path.isfile(default_config):
             config_file = default_config
             

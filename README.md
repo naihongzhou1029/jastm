@@ -18,12 +18,12 @@ Just Another Soak Testing Monitor — real-time system monitoring and post-run a
 ## Requirements
 
 - **Python**: 3.x
-- **Dependencies**: `psutil`, `matplotlib` (with TkAgg backend), `tkinter` (usually bundled with Python), `PyYAML` (for config file support)
+- **Dependencies**: `psutil`, `matplotlib` (with TkAgg backend), `tkinter` (usually bundled with Python)
 
 Install:
 
 ```bash
-pip install psutil matplotlib pyyaml
+pip install psutil matplotlib
 ```
 
 ## Usage
@@ -45,7 +45,7 @@ Options:
 |--------|-------------|---------|
 | `--sample-rate` | Sampling interval in seconds | `1.0` |
 | `--machine-id` | 4-digit identifier for this machine; if omitted, a 4-digit ID is derived from the NIC MAC address | Derived from NIC MAC (4 digits) |
-| `--config-file` | Path to YAML config file providing default values for supported options | *(none)* |
+| `--config-file` | Path to INI config file providing default values for supported options | *(none)* |
 
 Log file is created automatically, using the pattern: `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv` (for example, `chrome_PID1234_20231025_100000_monitor.csv`). The log contains these columns: `Timestamp`, `CPU_Usage_%`, and `Memory_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
 
@@ -66,7 +66,7 @@ Analysis options:
 
 `--parse-file` cannot be combined with `--process-name`, `--process-id`, or `--program`.
 
-`--config-file` applies to both collection and analysis options; see **Config file (`config.yaml`)**.
+`--config-file` applies to both collection and analysis options; see **Config file (`config.ini`)**.
 
 #### Aggregating multiple runs
 
@@ -93,69 +93,40 @@ This prints a markdown table, one row per input CSV, with the following columns:
 
 `machine_id` is inferred from a 4-digit token in the CSV filename when possible (for example, `node_1234_20231025_monitor.csv` → `1234`). If no such token is found, it falls back to the effective `--machine-id` value (from CLI, config, or the derived default).
 
-### Config file (`config.yaml`)
+### Config file (`config.ini`)
 
-- **Purpose**: Centralize default values and documentation for most CLI options.
-- **Enabling**: Pass `--config-file path/to/config.yaml` to load a YAML config.
+- **Purpose**: Centralize default values for most CLI options.
+- **Enabling**: Pass `--config-file path/to/config.ini` to load an INI config. If a `config.ini` exists in the same directory as `jastm.py`, it is loaded automatically (no flag needed).
 - **Precedence**:
-  - Command-line arguments **override** values from `config.yaml`.
-  - `config.yaml` values override built-in defaults.
+  - Command-line arguments **override** values from `config.ini`.
+  - `config.ini` values override built-in defaults.
 - **Config-managed options**:
-  - Collection: `process_name`, `program`, `sample_rate`, `machine_id`
+  - Collection: `sample_rate`, `machine_id`
   - Analysis: `cpu_peak_percentage`, `ram_peak_percentage`
 - **CLI-only options (not stored in config)**:
   - `--parse-file`
   - `--summary`
   - `--metrices-window`
+  - `--process-name`
   - `--process-id`
+  - `--program`
 - **Analysis mode behavior**:
-  - When `--parse-file` is used, collection settings from `config.yaml` are ignored.
-  - Analysis thresholds from `config.yaml` still apply unless overridden on the CLI.
+  - When `--parse-file` is used, collection settings from `config.ini` are ignored.
+  - Analysis thresholds from `config.ini` still apply unless overridden on the CLI.
 
-Example `config.yaml`:
+Example `config.ini`:
 
-```yaml
-version: 1
+```ini
+[collection]
+sample_rate = 1.0
+# machine_id =
 
-collection:
-  # Name of the process to monitor for data collection.
-  # Mutually exclusive with process_id and program.
-  process_name:
-    value: null
-    default: null
-
-  # Program command and arguments to launch and monitor for data collection.
-  # Represented as a YAML list of strings, for example:
-  # ["myapp.exe", "--flag", "value"].
-  program:
-    value: null
-    default: null
-
-  # Sampling interval in seconds for data collection.
-  # Must be a positive number.
-  sample_rate:
-    value: 1.0
-    default: 1.0
-
-  # 4-digit machine identifier for this host.
-  # If null, a default ID is derived from the NIC MAC address.
-  machine_id:
-    value: null
-    default: null
-
-analysis:
-  # CPU peak absolute percentage threshold.
-  # For example, 90.0 means a CPU peak is any sample above 90.0% CPU usage.
-  cpu_peak_percentage:
-    value: 90.0
-    default: 90.0
-
-  # RAM peak threshold percentage below average available memory (0–100).
-  # For example, 50.0 means a memory peak is any sample below 0.5x the average available memory.
-  ram_peak_percentage:
-    value: 50.0
-    default: 50.0
+[analysis]
+cpu_peak_percentage = 90.0
+ram_peak_percentage = 50.0
 ```
+
+Empty or commented-out values are treated as not set. Process targeting (`--process-name`, `--process-id`, `--program`) is CLI-only and cannot be set in the config file.
 
 ## Collected metrics
 
