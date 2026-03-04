@@ -1457,18 +1457,6 @@ def _derive_default_machine_id() -> str:
         return "0000"
 
 
-def _infer_machine_id_from_path(path: str, default_machine_id: str) -> str:
-    """
-    Infer a 4-digit machine ID from the CSV filename.
-    Falls back to default_machine_id if no suitable token is found.
-    """
-    base = os.path.basename(path)
-    # Look for a standalone 4-digit sequence in the filename
-    match = re.search(r'(?<!\d)(\d{4})(?!\d)', base)
-    if match:
-        return match.group(1)
-    return default_machine_id
-
 
 def _format_duration_days_hours(duration_seconds: float) -> str:
     """Format duration in 'Xd Yh' using whole days and hours."""
@@ -1479,7 +1467,7 @@ def _format_duration_days_hours(duration_seconds: float) -> str:
     return f"{days}d {hours}h"
 
 
-def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: float, default_machine_id: str) -> None:
+def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: float) -> None:
     """
     Aggregate multiple CSV logs into a single markdown table for human review.
 
@@ -1496,7 +1484,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
             print(f"Warning: Skipping file due to load error: {path}", file=sys.stderr)
             continue
 
-        machine_id = _infer_machine_id_from_path(path, default_machine_id)
+        machine_id = os.path.splitext(os.path.basename(path))[0]
 
         if analyzer.timestamps:
             start_dt = analyzer.start_datetime + timedelta(seconds=analyzer.timestamps[0])
@@ -1658,7 +1646,6 @@ def main():
             args.aggregate_summaries,
             cpu_peak_criteria=args.cpu_peak_percentage,
             ram_peak_criteria=ram_peak_ratio,
-            default_machine_id=args.machine_id,
         )
         return
 

@@ -95,6 +95,18 @@ Analysis also computes a linear regression of `Memory_MB` over elapsed time, rep
 
 `_infer_machine_id_from_path()` uses `(?<!\d)(\d{4})(?!\d)` to extract the first 4-digit token from the CSV basename that is not surrounded by other digits. Falls back to the NIC-MAC-derived ID if no token is found.
 
+`--machine-id` is also a CLI option (and can be set under `[collection]` in config.ini); it provides the fallback 4-digit ID when filename inference fails.
+
+### Aggregate output columns
+
+`--aggregate-summaries` prints a markdown table with one row per CSV file:
+
+`machine_id`, `start_time`, `duration(days and hours)`, `cpu_avg_%`, `cpu_peak_count`, `mem_avg`, `mem_peak_count`, `mem_slope`, `mem_r_square`, `flags`
+
+### Metrics window interactivity
+
+`--metrices-window` renders CPU (scaled ×20) and available memory over elapsed time. Features: scroll to zoom, hover for interpolated values, arrow-key cursor, scatter overlay for CPU (red) and memory (orange) peaks, average labels on the right axis.
+
 ### Test suite layout
 
 ```
