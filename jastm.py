@@ -1472,8 +1472,8 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     """
     Aggregate multiple CSV logs into a single markdown table for human review.
 
-    Columns: machine_id, start_time, duration(days and hours),
-    cpu_avg_%, cpu_peak_count, mem_avg, mem_peak_count, flags.
+    Columns: Machine ID, Start Time, Duration, CPU(%), CPU Peak,
+    RAM(MB), RAM Peak, RAM Slope, RAM R-Square, Flag.
     """
     rows = []
     for path in filepaths:
@@ -1531,8 +1531,8 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     rows.sort(key=lambda r: (r["machine_id"], r["start_time"], r["source"]))
 
     print("\n=== Aggregated Summary Report ===")
-    print("| machine_id | start_time | duration(days and hours) | cpu_avg_% | cpu_peak_count | mem_avg | mem_peak_count | mem_slope | mem_r_square | flags |")
-    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
+    print("| Machine<br>ID | Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope | RAM<br>R-Square |")
+    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for r in rows:
         if r["mem_slope"] is None or r["mem_r2"] is None:
             mem_slope_str = "NA"
@@ -1544,7 +1544,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
             f"| {r['machine_id']} | {r['start_time']} | {r['duration']} | "
             f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
             f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | "
-            f"{mem_slope_str} | {mem_r2_str} | {r['flags']} |"
+            f"{mem_slope_str} | {mem_r2_str} |"
         )
     print()
 
