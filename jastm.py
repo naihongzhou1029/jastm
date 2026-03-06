@@ -7,6 +7,7 @@ Monitors CPU usage and system memory, displaying data in a live line chart.
 import argparse
 import configparser
 import csv
+import glob
 import os
 import re
 import shlex
@@ -1642,8 +1643,21 @@ def main():
 
     # Analysis Mode - aggregate multiple CSV logs
     if getattr(args, "aggregate_summaries", None):
+        expanded_paths = []
+        for p in args.aggregate_summaries:
+            matches = glob.glob(p)
+            if not matches:
+                if any(c in p for c in "*?["):
+                    print(f"Error: No files match pattern: {p}", file=sys.stderr)
+                else:
+                    print(f"Error: File not found: {p}", file=sys.stderr)
+                sys.exit(1)
+            expanded_paths.extend(matches)
+        # Deduplicate while preserving order (same file from multiple patterns)
+        seen = set()
+        unique_paths = [x for x in expanded_paths if not (x in seen or seen.add(x))]
         aggregate_summaries(
-            args.aggregate_summaries,
+            unique_paths,
             cpu_peak_criteria=args.cpu_peak_percentage,
             ram_peak_criteria=ram_peak_ratio,
         )
