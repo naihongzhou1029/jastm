@@ -11,6 +11,7 @@ Just Another Soak Testing Monitor — real-time system monitoring and post-run a
 
 - `jastm.py`: Main CLI entrypoint and implementation of data collection and analysis.
 - `README.md`: Usage guide and high-level documentation.
+- `wiki/journal.md`: Developer journal recording technical decisions, implementation phases, and insights.
 - `tests/`: Automated test suite ensuring correctness of all features.
   - `smoke_test.py`: Comprehensive test suite covering CLI parsing, validation, data collection, and post-run analysis.
   - `happy_path.py`: High-level tests verifying core end-to-end user workflows.
