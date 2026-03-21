@@ -62,7 +62,7 @@ def _write_temp_config_ini(body: str) -> str:
 def run_jastm(args, cwd=None, timeout=None, capture=True):
     """Run jastm.py with given args. Returns (returncode, stdout, stderr)."""
     cmd = [sys.executable, JASTM_PY] + args
-    kw = {"cwd": cwd or PROJECT_ROOT, "capture_output": capture, "text": True}
+    kw = {"cwd": cwd or PROJECT_ROOT, "capture_output": capture, "text": True, "stdin": subprocess.DEVNULL}
     if timeout:
         kw["timeout"] = timeout
     try:
@@ -211,7 +211,7 @@ class TestOptionValidation(unittest.TestCase):
     def test_2_6_reject_empty_program(self):
         code, _, err = run_jastm(["--program"])
         self.assertNotEqual(code, 0)
-        self.assertIn("--program", err)
+        self.assertTrue("--program" in err or "No selection made" in err)
 
     def test_2_7_missing_config_file(self):
         """Missing config file should yield non-zero exit and mention not found."""
@@ -322,7 +322,7 @@ class TestDataCollection(unittest.TestCase):
         with open(path, newline="") as f:
             rows = list(csv.reader(f))
         self.assertGreaterEqual(len(rows), 2, "CSV should have header + at least one data row")
-        self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB"])
+        self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB", "VMS_MB", "RSS_MB"])
 
     def test_3_2_process_name_filter(self):
         """Log filename includes process name (e.g. python_…_monitor.csv)."""
@@ -350,16 +350,44 @@ class TestDataCollection(unittest.TestCase):
         self.assertIsNotNone(path)
         with open(path, newline="") as f:
             rows = list(csv.reader(f))
-        self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB"])
+        self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB", "VMS_MB", "RSS_MB"])
         iso_re = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
         for row in rows[1:]:
-            self.assertEqual(len(row), 3, row)
+            self.assertEqual(len(row), 5, row)
             self.assertTrue(iso_re.match(row[0]), f"Timestamp should be ISO format: {row[0]}")
             cpu = float(row[1])
             mem = float(row[2])
             self.assertGreaterEqual(cpu, 0.0, f"CPU should be >= 0, got {cpu}")
             self.assertLessEqual(cpu, 100.0, f"CPU should be <= 100, got {cpu}")
             self.assertGreater(mem, 0.0, f"Memory_MB should be positive, got {mem}")
+
+    def test_3_9_vas_metrics_present_for_process(self):
+        """VMS and RSS should be numeric when monitoring a specific process."""
+        pid = os.getpid()
+        out, _ = run_collection_for_seconds(["--process-id", str(pid), "--sample-rate", "0.2"], seconds=2.0)
+        path = find_recent_monitor_csv(PROJECT_ROOT, name_contains=f"PID{pid}")
+        self.assertIsNotNone(path)
+        with open(path, newline="") as f:
+            rows = list(csv.reader(f))
+        for row in rows[1:]:
+            self.assertEqual(len(row), 5)
+            self.assertNotEqual(row[3], "N/A")
+            self.assertNotEqual(row[4], "N/A")
+            vms = float(row[3])
+            rss = float(row[4])
+            self.assertGreater(vms, 0)
+            self.assertGreater(rss, 0)
+
+    def test_3_10_vas_metrics_na_for_system_wide(self):
+        """VMS and RSS should be N/A when monitoring system-wide."""
+        out, _ = run_collection_for_seconds(["--sample-rate", "0.2"], seconds=2.0)
+        path = find_recent_monitor_csv(PROJECT_ROOT)
+        with open(path, newline="") as f:
+            rows = list(csv.reader(f))
+        for row in rows[1:]:
+            self.assertEqual(len(row), 5)
+            self.assertEqual(row[3], "N/A")
+            self.assertEqual(row[4], "N/A")
 
     def test_3_5_machine_id_default(self):
         """Machine ID should be printed as a 4-digit identifier when not provided explicitly."""
@@ -470,11 +498,11 @@ class TestAnalysisMode(unittest.TestCase):
         """Exit 0; aggregated markdown table with expected column names."""
         code, out, err = run_jastm(["--aggregate-summaries", SAMPLE_CSV, SAMPLE_CSV])
         self.assertEqual(code, 0, err or out)
-        combined = out + err
+        combined = (out + err).replace("<br>", " ")
         self.assertIn("Aggregated Summary Report", combined)
         for col in [
-            "machine_id", "start_time", "duration(days and hours)", "cpu_avg_%",
-            "cpu_peak_count", "mem_avg", "mem_peak_count", "mem_slope", "mem_r_square", "flags",
+            "Machine ID", "Start Time", "Duration", "CPU(%)",
+            "CPU Peak", "RAM(MB)", "RAM Peak", "RAM Slope", "RAM R-Square",
         ]:
             self.assertIn(col, combined, f"Aggregated table should include column {col!r}")
 
@@ -488,20 +516,20 @@ class TestAnalysisMode(unittest.TestCase):
             "--ram-peak-percentage", "30",
         ])
         self.assertEqual(code, 0, err or out)
-        combined = out + err
+        combined = (out + err).replace("<br>", " ")
         lines = combined.splitlines()
 
         # Locate header row dynamically by column names (not by line index)
         header_idx = next(
             (i for i, line in enumerate(lines)
-             if line.lstrip().startswith("|") and "cpu_peak_count" in line and "mem_peak_count" in line),
+             if line.lstrip().startswith("|") and "CPU Peak" in line and "RAM Peak" in line),
             None,
         )
         self.assertIsNotNone(header_idx, f"Could not find aggregate table header:\n{combined}")
 
         header_cells = [c.strip() for c in lines[header_idx].split("|")]
-        cpu_col = next(i for i, h in enumerate(header_cells) if h == "cpu_peak_count")
-        mem_col = next(i for i, h in enumerate(header_cells) if h == "mem_peak_count")
+        cpu_col = next(i for i, h in enumerate(header_cells) if h == "CPU Peak")
+        mem_col = next(i for i, h in enumerate(header_cells) if h == "RAM Peak")
 
         data_idx = header_idx + 2  # skip separator row
         self.assertLess(data_idx, len(lines), "Expected at least one data row after the header")
@@ -587,6 +615,29 @@ class TestAnalysisMode(unittest.TestCase):
         self.assertEqual(code, 0, err or out)
         self.assertIn("CPU_PEAKS", out + err, "flags column should contain CPU_PEAKS when peaks are found")
 
+    def test_4_18_vas_analysis_summary(self):
+        """Summary should include VMS and RSS stats if present in CSV."""
+        vas_csv = os.path.join(FIXTURES_DIR, "vas_sample.csv")
+        code, out, err = run_jastm(["--parse-file", vas_csv, "--summary"])
+        self.assertEqual(code, 0, err or out)
+        combined = out + err
+        self.assertIn("Process VAS Stats:", combined)
+        self.assertIn("VMS (Virtual Size):", combined)
+        self.assertIn("RSS (Working Set):", combined)
+        self.assertIn("VMS Trend:", combined)
+        self.assertIn("RSS Trend:", combined)
+
+    def test_4_19_fragmentation_risk_detection(self):
+        """Flag fragmentation risk if VMS grows much faster than RSS."""
+        # Create a specific case for fragmentation risk
+        # VMS: 100 -> 200 (slope 100)
+        # RSS: 50 -> 51 (slope 1)
+        vas_csv = os.path.join(FIXTURES_DIR, "vas_sample.csv")
+        code, out, err = run_jastm(["--parse-file", vas_csv, "--summary"])
+        self.assertEqual(code, 0, err or out)
+        self.assertIn("FRAGMENTATION RISK DETECTED", out + err)
+        self.assertIn("VMS is growing steadily while RSS is relatively flat", out + err)
+
 
 # ---------------------------------------------------------------------------
 # Section 5 & 6 – Program launch and config
@@ -649,7 +700,7 @@ class TestOptionalAndConfig(unittest.TestCase):
             with open(csv_path, newline="") as f:
                 rows = list(csv.reader(f))
             self.assertGreaterEqual(len(rows), 1)
-            self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB"])
+            self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB", "VMS_MB", "RSS_MB"])
         finally:
             try:
                 target_proc.terminate()

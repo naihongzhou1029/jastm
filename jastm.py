@@ -100,6 +100,39 @@ def _ensure_tkinter():
     sys.exit(1)
 
 
+def compute_linear_regression(xs: list, ys: list) -> Tuple[float, float]:
+    """
+    Compute linear regression of ys over xs.
+    Returns: (slope, r2)
+    """
+    n = len(xs)
+    if n < 2:
+        return 0.0, 0.0
+
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+
+    sxx = 0.0
+    syy = 0.0
+    sxy = 0.0
+    for x, y in zip(xs, ys):
+        dx = x - mean_x
+        dy = y - mean_y
+        sxx += dx * dx
+        syy += dy * dy
+        sxy += dx * dy
+
+    if sxx == 0:
+        return 0.0, 0.0
+
+    slope = sxy / sxx
+    if syy == 0:
+        r2 = 1.0
+    else:
+        r2 = (sxy * sxy) / (sxx * syy)
+
+    return slope, r2
+
 class DataCollector:
     """Main monitoring application class."""
     
@@ -130,6 +163,8 @@ class DataCollector:
         self.timestamps = deque(maxlen=self.max_samples)
         self.cpu_data = deque(maxlen=self.max_samples)
         self.memory_data = deque(maxlen=self.max_samples)
+        self.vms_data = deque(maxlen=self.max_samples)
+        self.rss_data = deque(maxlen=self.max_samples)
         
         # Total elapsed time tracking
         self.total_elapsed_time = 0.0
@@ -175,7 +210,7 @@ class DataCollector:
         try:
             self.csv_file = open(self.log_file, 'w', newline='')
             self.csv_writer = csv.writer(self.csv_file)
-            self.csv_writer.writerow(['Timestamp', 'CPU_Usage_%', 'Memory_MB'])
+            self.csv_writer.writerow(['Timestamp', 'CPU_Usage_%', 'Memory_MB', 'VMS_MB', 'RSS_MB'])
             self.csv_file.flush()
         except IOError as e:
             print(f"Warning: Could not open log file {self.log_file}: {e}", file=sys.stderr)
@@ -218,35 +253,45 @@ class DataCollector:
             print(f"Error: Failed to get process: {e}", file=sys.stderr)
             return False
     
-    def collect_metrics(self) -> Tuple[float, float]:
-        """Collect CPU usage and memory metrics. Returns (cpu_percent, memory_mb)."""
+    def collect_metrics(self) -> Tuple[Optional[float], Optional[float], Optional[float], Optional[float]]:
+        """Collect CPU usage and memory metrics. Returns (cpu_percent, memory_mb, vms_mb, rss_mb)."""
         try:
-            # CPU usage
+            vms_mb = None
+            rss_mb = None
+            
+            # CPU usage and VAS
             if self.process:
                 # Use interval=None for non-blocking since we manage sleep in loop
                 cpu_percent = self.process.cpu_percent(interval=None)
+                mem_info = self.process.memory_info()
+                vms_mb = mem_info.vms / (1024 * 1024)
+                rss_mb = mem_info.rss / (1024 * 1024)
             else:
                 cpu_percent = psutil.cpu_percent(interval=None)
             
             # System-wide free memory in MB
             memory_mb = psutil.virtual_memory().available / (1024 * 1024)
             
-            return cpu_percent, memory_mb
+            return cpu_percent, memory_mb, vms_mb, rss_mb
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             # Process terminated or access denied
-            return None, None
+            return None, None, None, None
         except Exception as e:
             print(f"Warning: Error collecting metrics: {e}", file=sys.stderr)
-            return None, None
+            return None, None, None, None
     
-    def write_log(self, timestamp: datetime, cpu_percent: float, memory_mb: float):
+    def write_log(self, timestamp: datetime, cpu_percent: float, memory_mb: float, vms_mb: Optional[float] = None, rss_mb: Optional[float] = None):
         """Write metrics to CSV log file if enabled."""
         if self.csv_writer and self.csv_file:
             try:
+                vms_str = f"{vms_mb:.2f}" if vms_mb is not None else "N/A"
+                rss_str = f"{rss_mb:.2f}" if rss_mb is not None else "N/A"
                 self.csv_writer.writerow([
                     timestamp.strftime('%Y-%m-%d %H:%M:%S'),
                     f"{cpu_percent:.6f}",
-                    f"{memory_mb:.2f}"
+                    f"{memory_mb:.2f}",
+                    vms_str,
+                    rss_str
                 ])
                 self.csv_file.flush()
             except IOError as e:
@@ -701,7 +746,7 @@ class DataCollector:
                 loop_start = time.time()
                 
                 # Collect metrics
-                cpu_percent, memory_mb = self.collect_metrics()
+                cpu_percent, memory_mb, vms_mb, rss_mb = self.collect_metrics()
                 
                 if cpu_percent is not None and memory_mb is not None:
                     # Reset failure counter on success
@@ -717,11 +762,15 @@ class DataCollector:
                         self.timestamps.append(elapsed)
                         self.cpu_data.append(cpu_percent)
                         self.memory_data.append(memory_mb)
+                        if vms_mb is not None:
+                            self.vms_data.append(vms_mb)
+                        if rss_mb is not None:
+                            self.rss_data.append(rss_mb)
                         self.total_elapsed_time = elapsed
                     
                     # Write log (Always logging in default mode)
                     if self.log_file:
-                        self.write_log(timestamp, cpu_percent, memory_mb)
+                        self.write_log(timestamp, cpu_percent, memory_mb, vms_mb, rss_mb)
                 else:
                     # Process terminated or error
                     self.consecutive_failures += 1
@@ -804,6 +853,8 @@ class DataAnalyzer:
         self.timestamps = []
         self.cpu_data = []
         self.memory_data = []
+        self.vms_data = []
+        self.rss_data = []
         self.avg_cpu = 0.0
         self.avg_mem = 0.0
         self.duration_seconds = 0.0
@@ -868,6 +919,13 @@ class DataAnalyzer:
                         cpu = float(cpu_str)
                         mem = float(mem_str)
                         
+                        vms = None
+                        rss = None
+                        if len(row) > 3 and row[3] != 'N/A':
+                            vms = float(row[3])
+                        if len(row) > 4 and row[4] != 'N/A':
+                            rss = float(row[4])
+                        
                         if start_time_val is None:
                             start_time_val = ts
                             self.start_datetime = ts
@@ -877,6 +935,8 @@ class DataAnalyzer:
                         self.timestamps.append(elapsed)
                         self.cpu_data.append(cpu)
                         self.memory_data.append(mem)
+                        self.vms_data.append(vms)
+                        self.rss_data.append(rss)
                         
                     except ValueError:
                         continue
@@ -942,45 +1002,35 @@ class DataAnalyzer:
             self.mem_trend_slope_per_hour = None
             self.mem_trend_r2 = None
             return
-        n = len(self.timestamps)
-        if n < 2:
-            self.mem_trend_slope_per_hour = None
-            self.mem_trend_r2 = None
-            return
 
-        xs = self.timestamps
-        ys = self.memory_data
-
-        mean_x = sum(xs) / n
-        mean_y = sum(ys) / n
-
-        sxx = 0.0
-        syy = 0.0
-        sxy = 0.0
-        for x, y in zip(xs, ys):
-            dx = x - mean_x
-            dy = y - mean_y
-            sxx += dx * dx
-            syy += dy * dy
-            sxy += dx * dy
-
-        if sxx <= 0.0 or syy <= 0.0:
-            # Degenerate data (e.g., constant timestamps or memory); treat as no trend.
-            self.mem_trend_slope_per_hour = None
-            self.mem_trend_r2 = None
-            return
-
-        slope_per_second = sxy / sxx
-        r2 = (sxy * sxy) / (sxx * syy)
-
-        # Numerical guardrails
-        if r2 < 0.0:
-            r2 = 0.0
-        elif r2 > 1.0:
-            r2 = 1.0
-
-        self.mem_trend_slope_per_hour = slope_per_second * 3600.0
-        self.mem_trend_r2 = r2
+        slope, r2 = compute_linear_regression(self.timestamps, self.memory_data)
+        self.mem_trend_slope_per_hour = slope * 3600.0 if slope is not None else None
+        self.mem_trend_r2 = r2 if r2 is not None else None
+        
+        # Calculate VAS metrics
+        self.vms_slope_per_hour = None
+        self.vms_r2 = None
+        self.rss_slope_per_hour = None
+        self.rss_r2 = None
+        self.gap_slope_per_hour = None
+        
+        valid_vms = [v for v in self.vms_data if v is not None]
+        valid_rss = [r for r in self.rss_data if r is not None]
+        
+        if len(valid_vms) == len(self.timestamps) and len(valid_vms) > 1:
+            vms_slope, vms_r2 = compute_linear_regression(self.timestamps, valid_vms)
+            self.vms_slope_per_hour = vms_slope * 3600.0
+            self.vms_r2 = vms_r2
+            
+        if len(valid_rss) == len(self.timestamps) and len(valid_rss) > 1:
+            rss_slope, rss_r2 = compute_linear_regression(self.timestamps, valid_rss)
+            self.rss_slope_per_hour = rss_slope * 3600.0
+            self.rss_r2 = rss_r2
+            
+        if len(valid_vms) == len(self.timestamps) and len(valid_rss) == len(self.timestamps) and len(valid_vms) > 1:
+            gaps = [v - r for v, r in zip(valid_vms, valid_rss)]
+            gap_slope, _ = compute_linear_regression(self.timestamps, gaps)
+            self.gap_slope_per_hour = gap_slope * 3600.0
 
     def show_summary(self):
         """Print summary report."""
@@ -1010,9 +1060,45 @@ class DataAnalyzer:
             else:
                 direction = "flat"
             print(
-                f"Memory Trend: slope={self.mem_trend_slope_per_hour:.2f} MB/hour | "
+                f"System Memory Trend: slope={self.mem_trend_slope_per_hour:.2f} MB/hour | "
                 f"R^2={self.mem_trend_r2:.3f} ({direction})"
             )
+            
+        # Process VAS Summary
+        valid_vms = [v for v in self.vms_data if v is not None]
+        valid_rss = [r for r in self.rss_data if r is not None]
+        
+        if valid_vms and valid_rss:
+            min_vms, max_vms = min(valid_vms), max(valid_vms)
+            min_rss, max_rss = min(valid_rss), max(valid_rss)
+            print(f"\nProcess VAS Stats:")
+            print(f"  VMS (Virtual Size): Min={min_vms:.2f} MB | Max={max_vms:.2f} MB")
+            print(f"  RSS (Working Set):  Min={min_rss:.2f} MB | Max={max_rss:.2f} MB")
+            
+            if self.vms_slope_per_hour is not None:
+                print(f"  VMS Trend: slope={self.vms_slope_per_hour:.2f} MB/hour | R^2={self.vms_r2:.3f}")
+            if self.rss_slope_per_hour is not None:
+                print(f"  RSS Trend: slope={self.rss_slope_per_hour:.2f} MB/hour | R^2={self.rss_r2:.3f}")
+            if self.gap_slope_per_hour is not None:
+                print(f"  Fragmentation Gap Trend: slope={self.gap_slope_per_hour:.2f} MB/hour")
+            
+            # Alerts
+            fragmentation_alerts = []
+            final_vms = valid_vms[-1]
+            final_rss = valid_rss[-1]
+            
+            if final_rss > 0 and (final_vms / final_rss) > 1.5:
+                fragmentation_alerts.append(f"High VMS/RSS Ratio (>1.5x): Currently {final_vms/final_rss:.2f}x")
+                
+            if self.vms_slope_per_hour is not None and self.rss_slope_per_hour is not None:
+                # If VMS is growing but RSS is not keeping up (e.g. growing much slower or flat)
+                if self.vms_slope_per_hour > 1.0 and (self.rss_slope_per_hour < 0.1 * self.vms_slope_per_hour):
+                    fragmentation_alerts.append("VMS is growing steadily while RSS is relatively flat.")
+            
+            if fragmentation_alerts:
+                print("\n  [!] FRAGMENTATION RISK DETECTED:")
+                for alert in fragmentation_alerts:
+                    print(f"      - {alert}")
         
         print(f"\n### Peaks Report (CPU > {self.cpu_peak_criteria:.0f}%, RAM < {self.ram_peak_criteria*100:.0f}% deviation)")
         
@@ -1300,18 +1386,30 @@ def _pick_executable_and_write_launcher():
     for i, name in enumerate(candidates, 1):
         print(f"  {i:>2}. {name}")
 
+    if not sys.stdin.isatty():
+        print("Error: Interactive program selection requires an interactive terminal.", file=sys.stderr)
+        sys.exit(1)
+
+    chosen = None
     while True:
         try:
-            raw = input("Enter number: ").strip()
+            raw = input("Enter number (or 'q' to quit): ").strip()
+            if raw.lower() == 'q':
+                sys.exit(0)
+            if not raw:
+                continue
             idx = int(raw) - 1
             if 0 <= idx < len(candidates):
                 chosen = candidates[idx]
                 break
             print(f"Please enter a number between 1 and {len(candidates)}.")
-        except ValueError:
+        except (ValueError, EOFError):
+            if isinstance(sys.exc_info()[1], EOFError):
+                 print("\nNo selection made (EOF).", file=sys.stderr)
+                 sys.exit(1)
             print("Invalid input. Please enter a number.")
-        except EOFError:
-            print("\nNo selection made.", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("\nOperation cancelled.", file=sys.stderr)
             sys.exit(1)
 
     python_exe = sys.executable
@@ -1531,8 +1629,8 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     rows.sort(key=lambda r: (r["machine_id"], r["start_time"], r["source"]))
 
     print("\n=== Aggregated Summary Report ===")
-    print("| Machine<br>ID | Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope | RAM<br>R-Square |")
-    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
+    print("| Machine<br>ID | Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope | RAM<br>R-Square | Flags |")
+    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for r in rows:
         if r["mem_slope"] is None or r["mem_r2"] is None:
             mem_slope_str = "NA"
@@ -1540,11 +1638,14 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         else:
             mem_slope_str = f"{r['mem_slope']:.2f}"
             mem_r2_str = f"{r['mem_r2']:.3f}"
+        
+        flags_display = r["flags"] if r["flags"] else "-"
+        
         print(
             f"| {r['machine_id']} | {r['start_time']} | {r['duration']} | "
             f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
             f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | "
-            f"{mem_slope_str} | {mem_r2_str} |"
+            f"{mem_slope_str} | {mem_r2_str} | {flags_display} |"
         )
     print()
 

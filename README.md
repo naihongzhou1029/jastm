@@ -47,7 +47,7 @@ Options:
 | `--machine-id` | 4-digit identifier for this machine; if omitted, a 4-digit ID is derived from the NIC MAC address | Derived from NIC MAC (4 digits) |
 | `--config-file` | Path to INI config file providing default values for supported options | *(none)* |
 
-Log file is created automatically, using the pattern: `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv` (for example, `chrome_PID1234_20231025_100000_monitor.csv`). The log contains these columns: `Timestamp`, `CPU_Usage_%`, and `Memory_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
+Log file is created automatically, using the pattern: `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv` (for example, `chrome_PID1234_20231025_100000_monitor.csv`). The log contains these columns: `Timestamp`, `CPU_Usage_%`, `Memory_MB`, `VMS_MB`, and `RSS_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
 
 ### Analysis (post-run)
 
@@ -80,16 +80,16 @@ When you have soak logs from multiple machines (or multiple runs) and want a **s
 
 This prints a markdown table, one row per input CSV, with the following columns:
 
-- `machine_id`
-- `start_time`
-- `duration(days and hours)`
-- `cpu_avg_%`
-- `cpu_peak_count`
-- `mem_avg`
-- `mem_peak_count`
-- `mem_slope`
-- `mem_r_square`
-- `flags`
+- `Machine ID`
+- `Start Time`
+- `Duration`
+- `CPU(%)`
+- `CPU Peak` (count)
+- `RAM(MB)` (average available)
+- `RAM Peak` (count)
+- `RAM Slope` (MB/hour)
+- `RAM R-Square`
+- `Flags` (e.g., `CPU_PEAKS`, `MEM_PEAKS`)
 
 `machine_id` is inferred from a 4-digit token in the CSV filename when possible (for example, `node_1234_20231025_monitor.csv` → `1234`). If no such token is found, it falls back to the effective `--machine-id` value (from CLI, config, or the derived default).
 
@@ -131,14 +131,18 @@ Empty or commented-out values are treated as not set. Process targeting (`--proc
 ## Collected metrics
 
 - **CPU**: Per-process CPU % (when a process is targeted) or system-wide CPU % (when no process is specified). First sample after start may be 0 (priming).
-- **Memory**: System-wide **available** memory in MB (`psutil.virtual_memory().available`).
+- **Memory (System)**: System-wide **available** memory in MB (`psutil.virtual_memory().available`).
+- **Virtual Address Space (Process-specific)**:
+  - **VMS**: Virtual Memory Size (total address space reserved).
+  - **RSS**: Resident Set Size (actual physical RAM used).
 
 ## CSV format
 
-- **Header**: `Timestamp`, `CPU_Usage_%`, `Memory_MB`
+- **Header**: `Timestamp`, `CPU_Usage_%`, `Memory_MB`, `VMS_MB`, `RSS_MB`
 - **Timestamp**: ISO format `YYYY-MM-DD HH:MM:SS`
 - **CPU_Usage_%**: Float (e.g. 6 decimals)
 - **Memory_MB**: Float (2 decimals)
+- **VMS_MB / RSS_MB**: Float (2 decimals, or `N/A` if no process specified)
 
 ## Analysis behavior
 
@@ -147,8 +151,11 @@ Empty or commented-out values are treated as not set. Process targeting (`--proc
 - **Peak detection**:
   - **CPU peak**: Sample where `CPU_Usage_% > cpu_peak_percentage`.
   - **Memory peak**: Sample where `Memory_MB < avg_memory * (1 - ram_peak_percentage/100)` (low available RAM).
-- **Memory trend (R² & slope)**: Linear regression of `Memory_MB` over elapsed time is computed to show a **slope in MB/hour** and an **R-squared index** (`R^2`) indicating how well a linear trend explains memory behavior (negative slope with high `R^2` can indicate leak risk; tune your own thresholds per system).  
-- **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, a memory trend line with slope and `R^2`, followed by markdown tables listing CPU peaks and memory peaks (timestamp, CPU %, memory MB).  
+- **Memory trend (R² & slope)**: Linear regression of `Memory_MB` over elapsed time is computed to show a **slope in MB/hour** and an **R-squared index** (`R^2`) indicating how well a linear trend explains memory behavior.
+- **VAS Analysis & Fragmentation Risk**: 
+  - Calculates the overall trend (slope) for **VMS**, **RSS**, and the **Fragmentation Gap** (VMS - RSS).
+  - **Fragmentation Risk Alert**: Triggered if the `VMS / RSS` ratio exceeds 1.5x, or if VMS shows a steady upward slope while RSS remains relatively flat (indicating potential address space exhaustion).
+- **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, a memory trend line, process VAS statistics (if applicable), and fragmentation risk alerts, followed by markdown tables listing CPU peaks and memory peaks.  
   ```
   Duration: 00:00:05 (5 seconds)
   Time Period: 2023-10-25 10:00:00 ~ 2023-10-25 10:00:05
@@ -158,17 +165,19 @@ Empty or commented-out values are treated as not set. Process targeting (`--proc
     Max: 95.0
     Avg: 25.36
 
-  Memory (MB):
-    Min: 1800.00
-    Max: 2100.00
-    Avg: 1980.15
-    Trend: slope=-34740.00 MB/hour | R^2=0.018 (decreasing)
+  System Memory Trend: slope=-34740.00 MB/hour | R^2=0.018 (decreasing)
+
+  Process VAS Stats:
+    VMS (Virtual Size): Min=100.00 MB | Max=200.00 MB
+    RSS (Working Set):  Min=50.00 MB | Max=54.00 MB
+    VMS Trend: slope=72000.00 MB/hour | R^2=0.850
+    RSS Trend: slope=2880.00 MB/hour | R^2=0.980
+    Fragmentation Gap Trend: slope=69120.00 MB/hour
+
+    [!] FRAGMENTATION RISK DETECTED:
+        - VMS is growing steadily while RSS is relatively flat.
 
   | CPU Peak Time        | CPU % | Memory MB |
-  |---------------------|-------|-----------|
-  | 2023-10-25 10:00:03 | 95.0  | 1800.00   |
-
-  | Memory Peak Time     | CPU % | Memory MB |
   |---------------------|-------|-----------|
   | 2023-10-25 10:00:03 | 95.0  | 1800.00   |
   ```
