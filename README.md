@@ -88,7 +88,7 @@ This prints a markdown table, one row per input CSV, with the following columns:
 - `RAM<br>Peak`
 - `RAM<br>Slope`
 - `RAM<br>R-Square`
-- `Flags`
+- `Warnings`
 
 ### Config file (`config.ini`)
 
