@@ -81,16 +81,16 @@ When you have soak logs from multiple machines (or multiple runs) and want a **s
 
 This prints a markdown table, one row per input CSV, with the following columns:
 
-- `Machine ID`
-- `Start Time`
+- `Machine<br>ID`
+- `Start<br>Time`
 - `Duration`
 - `CPU(%)`
-- `CPU Peak` (count)
-- `RAM(MB)` (average available)
-- `RAM Peak` (count)
-- `RAM Slope` (MB/hour)
-- `RAM R-Square`
-- `Flags` (e.g., `CPU_PEAKS`, `MEM_PEAKS`)
+- `CPU<br>Peak`
+- `RAM(MB)`
+- `RAM<br>Peak`
+- `RAM<br>Slope`
+- `RAM<br>R-Square`
+- `Flags`
 
 `machine_id` is inferred from a 4-digit token in the CSV filename when possible (for example, `node_1234_20231025_monitor.csv` → `1234`). If no such token is found, it falls back to the effective `--machine-id` value (from CLI, config, or the derived default).
 
@@ -156,16 +156,13 @@ Empty or commented-out values are treated as not set. Process targeting (`--proc
 - **VAS Analysis & Fragmentation Risk**: 
   - Calculates the overall trend (slope) for **VMS**, **RSS**, and the **Fragmentation Gap** (VMS - RSS).
   - **Fragmentation Risk Alert**: Triggered if the `VMS / RSS` ratio exceeds 1.5x, or if VMS shows a steady upward slope while RSS remains relatively flat (indicating potential address space exhaustion).
-- **Summary output example**: Display includes total duration, time period (start and end timestamps), minimum/maximum/average CPU and memory, a memory trend line, process VAS statistics (if applicable), and fragmentation risk alerts, followed by markdown tables listing CPU peaks and memory peaks.  
+- **Summary output example**:
   ```
-  Duration: 00:00:05 (5 seconds)
+  === Summary Report ===
+  Duration: 0.06 hours = 0.00 days
   Time Period: 2023-10-25 10:00:00 ~ 2023-10-25 10:00:05
-
-  CPU Usage (%):
-    Min: 5.5
-    Max: 95.0
-    Avg: 25.36
-
+  CPU Stats: Avg=25.36% | Min=5.50% | Max=95.00%
+  Memory Stats: Avg=1980.15 MB | Min=1800.00 MB | Max=2100.00 MB
   System Memory Trend: slope=-34740.00 MB/hour | R^2=0.018 (decreasing)
 
   Process VAS Stats:
@@ -178,9 +175,10 @@ Empty or commented-out values are treated as not set. Process targeting (`--proc
     [!] FRAGMENTATION RISK DETECTED:
         - VMS is growing steadily while RSS is relatively flat.
 
-  | CPU Peak Time        | CPU % | Memory MB |
-  |---------------------|-------|-----------|
-  | 2023-10-25 10:00:03 | 95.0  | 1800.00   |
+  #### CPU Peaks (> 90.00%)
+  | Timestamp | CPU (%) | Memory (MB) |
+  | :--- | :--- | :--- |
+  | 2023-10-25 10:00:03 | 95.00% | 1800.00 |
   ```
 
   (Peak rows show only samples exceeding peak thresholds. Tables may be empty if no peaks detected.)
