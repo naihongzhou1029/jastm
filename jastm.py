@@ -264,7 +264,14 @@ class DataCollector:
                 # Use interval=None for non-blocking since we manage sleep in loop
                 cpu_percent = self.process.cpu_percent(interval=None)
                 mem_info = self.process.memory_info()
-                vms_mb = mem_info.vms / (1024 * 1024)
+                # On Windows, mem_info.vms is PagefileUsage (pages on disk only).
+                # mem_info.private is Private Bytes — the true committed virtual memory,
+                # equivalent to Linux VMS. On Linux/Mac, mem_info.vms is the full
+                # virtual address space as expected.
+                if sys.platform == 'win32':
+                    vms_mb = mem_info.private / (1024 * 1024)
+                else:
+                    vms_mb = mem_info.vms / (1024 * 1024)
                 rss_mb = mem_info.rss / (1024 * 1024)
             else:
                 cpu_percent = psutil.cpu_percent(interval=None)
@@ -1071,7 +1078,10 @@ class DataAnalyzer:
         if valid_vms and valid_rss:
             min_vms, max_vms = min(valid_vms), max(valid_vms)
             min_rss, max_rss = min(valid_rss), max(valid_rss)
-            print(f"\nProcess VAS Stats:")
+            if sys.platform == 'win32':
+                print(f"\nProcess VAS Stats (Windows: VMS=Private Bytes, RSS=Working Set):")
+            else:
+                print(f"\nProcess VAS Stats:")
             print(f"  VMS (Virtual Size): Min={min_vms:.2f} MB | Max={max_vms:.2f} MB")
             print(f"  RSS (Working Set):  Min={min_rss:.2f} MB | Max={max_rss:.2f} MB")
             
@@ -1580,12 +1590,30 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         mem_slope = analyzer.mem_trend_slope_per_hour
         mem_r2 = analyzer.mem_trend_r2
 
-        flags = []
-        if cpu_peak_count > 0:
-            flags.append("CPU_PEAKS")
-        if mem_peak_count > 0:
-            flags.append("MEM_PEAKS")
-        flags_str = ",".join(flags)
+        warnings = []
+
+        # Memory leak: available RAM consistently declining (negative slope, strong R²)
+        if mem_slope is not None and mem_r2 is not None:
+            if mem_slope < 0 and mem_r2 > 0.7:
+                warnings.append("MEM_LEAK")
+
+        # Fragmentation risk (VAS data required)
+        valid_vms = [v for v in analyzer.vms_data if v is not None]
+        valid_rss = [r for r in analyzer.rss_data if r is not None]
+        if valid_vms and valid_rss:
+            final_vms = valid_vms[-1]
+            final_rss = valid_rss[-1]
+            frag_risk = False
+            if final_rss > 0 and (final_vms / final_rss) > 1.5:
+                frag_risk = True
+            if (analyzer.vms_slope_per_hour is not None and analyzer.rss_slope_per_hour is not None
+                    and analyzer.vms_slope_per_hour > 1.0
+                    and analyzer.rss_slope_per_hour < 0.1 * analyzer.vms_slope_per_hour):
+                frag_risk = True
+            if frag_risk:
+                warnings.append("FRAG_RISK")
+
+        warnings_str = ",".join(warnings)
 
         rows.append({
             "start_time": start_str,
@@ -1596,7 +1624,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
             "mem_peak_count": mem_peak_count,
             "mem_slope": mem_slope,
             "mem_r2": mem_r2,
-            "flags": flags_str,
+            "warnings": warnings_str,
             "source": path,
         })
 
@@ -1608,7 +1636,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     rows.sort(key=lambda r: (r["start_time"], r["source"]))
 
     print("\n=== Aggregated Summary Report ===")
-    print("| Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope | RAM<br>R-Square | Flags |")
+    print("| Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope<br>(MB/h) | RAM<br>R-Square | Warnings |")
     print("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for r in rows:
         if r["mem_slope"] is None or r["mem_r2"] is None:
@@ -1617,14 +1645,14 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         else:
             mem_slope_str = f"{r['mem_slope']:.2f}"
             mem_r2_str = f"{r['mem_r2']:.3f}"
-        
-        flags_display = r["flags"] if r["flags"] else "-"
-        
+
+        warnings_display = r["warnings"] if r["warnings"] else "-"
+
         print(
             f"| {r['start_time']} | {r['duration']} | "
             f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
             f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | "
-            f"{mem_slope_str} | {mem_r2_str} | {flags_display} |"
+            f"{mem_slope_str} | {mem_r2_str} | {warnings_display} |"
         )
     print()
 

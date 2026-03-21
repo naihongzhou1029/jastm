@@ -488,7 +488,7 @@ class TestAnalysisMode(unittest.TestCase):
         self.assertIn("Aggregated Summary Report", combined)
         for col in [
             "Start Time", "Duration", "CPU(%)",
-            "CPU Peak", "RAM(MB)", "RAM Peak", "RAM Slope", "RAM R-Square",
+            "CPU Peak", "RAM(MB)", "RAM Peak", "RAM Slope (MB/h)", "RAM R-Square",
         ]:
             self.assertIn(col, combined, f"Aggregated table should include column {col!r}")
 
@@ -583,14 +583,16 @@ class TestAnalysisMode(unittest.TestCase):
         self.assertEqual(code, 0, err or out)
         self.assertIn("No memory peaks detected", out + err)
 
-    def test_4_17_aggregate_flags_column(self):
-        """flags column should contain CPU_PEAKS when CPU peaks exist."""
-        # At threshold=50, smoke_sample.csv has 1 CPU peak
-        code, out, err = run_jastm([
-            "--aggregate-summaries", SAMPLE_CSV, "--cpu-peak-percentage", "50",
-        ])
+    def test_4_17_aggregate_warnings_column(self):
+        """Aggregate table should have a Warnings column; smoke_sample has no MEM_LEAK or FRAG_RISK."""
+        code, out, err = run_jastm(["--aggregate-summaries", SAMPLE_CSV])
         self.assertEqual(code, 0, err or out)
-        self.assertIn("CPU_PEAKS", out + err, "flags column should contain CPU_PEAKS when peaks are found")
+        # Header must use "Warnings", not "Flags"
+        self.assertIn("Warnings", out + err, "aggregate header should contain 'Warnings'")
+        self.assertNotIn("Flags", out + err, "aggregate header should not contain legacy 'Flags'")
+        # smoke_sample.csv has no VAS data and low R², so no warnings should fire
+        self.assertNotIn("MEM_LEAK", out + err, "smoke_sample should not trigger MEM_LEAK")
+        self.assertNotIn("FRAG_RISK", out + err, "smoke_sample should not trigger FRAG_RISK")
 
     def test_4_18_vas_analysis_summary(self):
         """Summary should include VMS and RSS stats if present in CSV."""
@@ -598,7 +600,10 @@ class TestAnalysisMode(unittest.TestCase):
         code, out, err = run_jastm(["--parse-file", vas_csv, "--summary"])
         self.assertEqual(code, 0, err or out)
         combined = out + err
-        self.assertIn("Process VAS Stats:", combined)
+        self.assertTrue(
+            "Process VAS Stats:" in combined or "Process VAS Stats (Windows:" in combined,
+            "VAS Stats section header not found",
+        )
         self.assertIn("VMS (Virtual Size):", combined)
         self.assertIn("RSS (Working Set):", combined)
         self.assertIn("VMS Trend:", combined)

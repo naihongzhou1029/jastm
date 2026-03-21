@@ -78,10 +78,13 @@ The flag is spelled `--metrices-window` (not `--metrics-window`) throughout the 
 
 Log files use the pattern `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv`.
 
-CSV columns: `Timestamp` (ISO `YYYY-MM-DD HH:MM:SS`), `CPU_Usage_%` (float), `Memory_MB` (float).
+CSV columns: `Timestamp` (ISO `YYYY-MM-DD HH:MM:SS`), `CPU_Usage_%` (float), `Memory_MB` (float), `VMS_MB` (float or `N/A`), `RSS_MB` (float or `N/A`).
 
 - **CPU**: per-process CPU % when a process is targeted; system-wide CPU % otherwise. First sample after start may be 0 (priming).
 - **Memory**: system-wide **available** memory in MB (`psutil.virtual_memory().available`), not process RSS.
+- **VMS_MB / RSS_MB**: platform-specific — `psutil.memory_info()` fields differ between Linux and Windows:
+  - **Linux**: `vms` = total virtual address space (always ≥ RSS); `rss` = resident set (physical pages in RAM).
+  - **Windows**: `vms` is `PagefileUsage` (pages on disk only, typically < RSS). jastm corrects this by using `private` (Private Bytes = total committed private virtual memory) for `VMS_MB` on Windows, so `VMS_MB` is semantically equivalent to Linux VMS. `RSS_MB` = Working Set (physical pages, including shared DLLs).
 
 Analysis also computes a linear regression of `Memory_MB` over elapsed time, reported as slope (MB/hour) and R² to indicate potential memory leaks.
 
