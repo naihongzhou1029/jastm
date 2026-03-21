@@ -110,25 +110,6 @@ def path_5_aggregate_summaries():
     print_result("Path 5: Aggregate summaries", success, "Aggregated report generated" if success else "Markdown table not found")
     return success
 
-def path_6_machine_id_and_nic_mac():
-    print("Testing Path 6: Machine ID and NIC MAC (default derivation)...")
-    # No config override: jastm derives machine_id from NIC MAC
-    cmd = [sys.executable, "-u", JASTM_PY, "--sample-rate", "0.5"]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    time.sleep(3)
-    proc.terminate()
-    try:
-        stdout, stderr = proc.communicate(timeout=3)
-    except Exception:
-        proc.kill()
-        stdout, stderr = proc.communicate()
-    machine_id_match = re.search(r"Machine ID: (\d{4})\b", stdout)
-    nic_mac_match = re.search(r"NIC MAC: (\S+)", stdout)
-    success = machine_id_match is not None and nic_mac_match is not None
-    msg = f"Machine ID: {machine_id_match.group(1)}, NIC MAC: {nic_mac_match.group(1)}" if success else "Machine ID (4-digit) or NIC MAC not found in output"
-    print_result("Path 6: Machine ID and NIC MAC", success, msg)
-    return success
-
 def list_items():
     print("--- JASTM Happy Path Test Items ---")
     items = [
@@ -136,8 +117,7 @@ def list_items():
         ("Path 2: Monitoring by process name", "Run jastm.py with --process-name python.exe.", "A <process>_*_monitor.csv is created and populated."),
         ("Path 3: Launch and monitor program", "Run jastm.py with --program.", "JASTM successfully launches the program, logs to a CSV, and exits 0."),
         ("Path 4: Analysis mode (summary)", "Run jastm.py with --parse-file <csv> --summary.", "Prints a textual summary with Duration and CPU Stats, exits 0."),
-        ("Path 5: Aggregate summaries", "Run jastm.py with --aggregate-summaries <csv1> <csv2>.", "Prints a Markdown table with 'Aggregated Summary Report'."),
-        ("Path 6: Machine ID and NIC MAC", "Run jastm.py in collection mode (no machine_id override).", "Output shows a 4-digit Machine ID and NIC MAC derived from the NIC.")
+        ("Path 5: Aggregate summaries", "Run jastm.py with --aggregate-summaries <csv1> <csv2>.", "Prints a Markdown table with 'Aggregated Summary Report'.")
     ]
     for name, action, expected in items:
         print(f"\n{name}")
@@ -167,7 +147,6 @@ def main():
         results.append(path_3_launch_program())
         results.append(path_4_analysis_summary())
         results.append(path_5_aggregate_summaries())
-        results.append(path_6_machine_id_and_nic_mac())
         
         print("\n--- Summary ---")
         all_ok = all(results)

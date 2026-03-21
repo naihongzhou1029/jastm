@@ -1470,8 +1470,6 @@ Examples:
     # General Options
     parser.add_argument('--sample-rate', type=float,
                        help=f'Sampling interval in seconds (default: {DEFAULT_SAMPLE_RATE}, Collection Mode only)')
-    parser.add_argument('--machine-id', type=str,
-                       help='4-digit machine identifier; default is derived from NIC MAC address')
     parser.add_argument('--config-file', type=str,
                        help='Path to INI config file providing default option values')
     
@@ -1541,22 +1539,6 @@ def _get_nic_mac_string() -> Optional[str]:
     return None
 
 
-def _derive_default_machine_id() -> str:
-    """Derive a 4-digit machine ID from the NIC MAC address."""
-    try:
-        mac_int = uuid.getnode()
-        if isinstance(mac_int, int):
-            return f"{mac_int % 10000:04d}"
-    except Exception:
-        pass
-    try:
-        host = socket.gethostname()
-        return f"{abs(hash(host)) % 10000:04d}"
-    except Exception:
-        return "0000"
-
-
-
 def _format_duration_days_hours(duration_seconds: float) -> str:
     """Format duration in 'Xd Yh' using whole days and hours."""
     total_seconds = int(duration_seconds)
@@ -1570,7 +1552,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     """
     Aggregate multiple CSV logs into a single markdown table for human review.
 
-    Columns: Machine ID, Start Time, Duration, CPU(%), CPU Peak,
+    Columns: Start Time, Duration, CPU(%), CPU Peak,
     RAM(MB), RAM Peak, RAM Slope, RAM R-Square, Flag.
     """
     rows = []
@@ -1582,8 +1564,6 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         if not analyzer.load_data():
             print(f"Warning: Skipping file due to load error: {path}", file=sys.stderr)
             continue
-
-        machine_id = os.path.splitext(os.path.basename(path))[0]
 
         if analyzer.timestamps:
             start_dt = analyzer.start_datetime + timedelta(seconds=analyzer.timestamps[0])
@@ -1608,7 +1588,6 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         flags_str = ",".join(flags)
 
         rows.append({
-            "machine_id": machine_id,
             "start_time": start_str,
             "duration": duration_label,
             "cpu_avg": cpu_avg,
@@ -1625,12 +1604,12 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         print("No valid data loaded for aggregation.")
         return
 
-    # Stable ordering: by machine_id then start_time
-    rows.sort(key=lambda r: (r["machine_id"], r["start_time"], r["source"]))
+    # Stable ordering: by start_time
+    rows.sort(key=lambda r: (r["start_time"], r["source"]))
 
     print("\n=== Aggregated Summary Report ===")
-    print("| Machine<br>ID | Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope | RAM<br>R-Square | Flags |")
-    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
+    print("| Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope | RAM<br>R-Square | Flags |")
+    print("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for r in rows:
         if r["mem_slope"] is None or r["mem_r2"] is None:
             mem_slope_str = "NA"
@@ -1642,7 +1621,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         flags_display = r["flags"] if r["flags"] else "-"
         
         print(
-            f"| {r['machine_id']} | {r['start_time']} | {r['duration']} | "
+            f"| {r['start_time']} | {r['duration']} | "
             f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
             f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | "
             f"{mem_slope_str} | {mem_r2_str} | {flags_display} |"
@@ -1668,29 +1647,15 @@ def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict])
     process_id = args.process_id
     program = args.program
     sample_rate = args.sample_rate
-    machine_id = args.machine_id
     
     if not is_analysis_mode:
         if sample_rate is None:
             cfg_rate = _get_config_option(config, "collection", "sample_rate")
             sample_rate = float(cfg_rate) if cfg_rate is not None else DEFAULT_SAMPLE_RATE
-        if machine_id is None:
-            cfg_machine_id = _get_config_option(config, "collection", "machine_id")
-            if cfg_machine_id is not None:
-                machine_id = str(cfg_machine_id)
-            else:
-                machine_id = _derive_default_machine_id()
     else:
         # Analysis mode: collection sample-rate is not used, but keep a sane value
         if sample_rate is None:
             sample_rate = DEFAULT_SAMPLE_RATE
-    if machine_id is None:
-        # Ensure we always have a concrete machine_id value
-        cfg_machine_id = _get_config_option(config, "collection", "machine_id")
-        if cfg_machine_id is not None:
-            machine_id = str(cfg_machine_id)
-        else:
-            machine_id = _derive_default_machine_id()
     
     merged = argparse.Namespace(**vars(args))
     merged.process_name = process_name
@@ -1699,7 +1664,6 @@ def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict])
     merged.sample_rate = sample_rate
     merged.cpu_peak_percentage = cpu_peak_percentage
     merged.ram_peak_percentage = ram_peak_percentage
-    merged.machine_id = machine_id
     return merged
 
 
@@ -1765,9 +1729,6 @@ def main():
         return
 
     # Data Collection Mode
-    # Machine ID is resolved via CLI/config or derived from NIC MAC address
-    if args.machine_id:
-        print(f"Machine ID: {args.machine_id}")
     nic_mac = _get_nic_mac_string()
     if nic_mac is not None:
         print(f"NIC MAC: {nic_mac}")

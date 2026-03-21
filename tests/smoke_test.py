@@ -37,7 +37,6 @@ REQUIRED_CLI_OPTIONS = [
     "--process-id",
     "--program",
     "--sample-rate",
-    "--machine-id",
     "--config-file",
     "--summary",
     "--metrices-window",
@@ -389,24 +388,11 @@ class TestDataCollection(unittest.TestCase):
             self.assertEqual(row[3], "N/A")
             self.assertEqual(row[4], "N/A")
 
-    def test_3_5_machine_id_default(self):
-        """Machine ID should be printed as a 4-digit identifier when not provided explicitly."""
-        out, _ = run_collection_for_seconds(["--sample-rate", "0.5"])
-        self.assertIn("Machine ID:", out)
-        m = re.search(r"Machine ID:\s*(\d{4})", out)
-        self.assertIsNotNone(m, f"Expected a 4-digit Machine ID in output, got: {out!r}")
-
     def test_3_6_process_name_not_found(self):
         """Non-existent process name should exit non-zero and mention the name in the error."""
         code, _, err = run_jastm(["--process-name", "__no_such_process_xyz__"])
         self.assertNotEqual(code, 0, "Expected non-zero exit when process name not found")
         self.assertIn("__no_such_process_xyz__", err, "Error should mention the missing process name")
-
-    def test_3_7_machine_id_cli_flag(self):
-        """Explicitly supplied --machine-id value should appear in output."""
-        out, _ = run_collection_for_seconds(["--machine-id", "7777", "--sample-rate", "0.5"])
-        self.assertIn("Machine ID:", out)
-        self.assertIn("7777", out)
 
     def test_3_8_csv_filename_timestamp_format(self):
         """CSV filename should contain a YYYYMMDD_HHMMSS timestamp."""
@@ -501,7 +487,7 @@ class TestAnalysisMode(unittest.TestCase):
         combined = (out + err).replace("<br>", " ")
         self.assertIn("Aggregated Summary Report", combined)
         for col in [
-            "Machine ID", "Start Time", "Duration", "CPU(%)",
+            "Start Time", "Duration", "CPU(%)",
             "CPU Peak", "RAM(MB)", "RAM Peak", "RAM Slope", "RAM R-Square",
         ]:
             self.assertIn(col, combined, f"Aggregated table should include column {col!r}")
@@ -580,15 +566,6 @@ class TestAnalysisMode(unittest.TestCase):
             "nonexistent_run.csv" in err or "not found" in err.lower(),
             f"Error should mention the missing file; got: {err!r}",
         )
-
-    def test_4_14_machine_id_inferred_from_filename(self):
-        """machine_id column should be the 4-digit token found in the CSV filename."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            named_csv = os.path.join(tmpdir, "node_5678_20231025_100000_monitor.csv")
-            shutil.copy(SAMPLE_CSV, named_csv)
-            code, out, err = run_jastm(["--aggregate-summaries", named_csv])
-        self.assertEqual(code, 0, err or out)
-        self.assertIn("5678", out + err, "machine_id should be inferred as '5678' from the filename")
 
     def test_4_15_summary_no_cpu_peaks(self):
         """Summary with a threshold above the data maximum should report no CPU peaks."""
@@ -757,48 +734,6 @@ class TestOptionalAndConfig(unittest.TestCase):
         combined = out + err
         self.assertIn("CPU > 10%", combined)
         self.assertIn("RAM < 20% deviation", combined)
-
-    def test_6_3_machine_id_from_config(self):
-        """Machine ID should be taken from config when provided."""
-        cfg_path = _write_temp_config_ini(
-            """
-            [collection]
-            machine_id = 9999
-            sample_rate = 0.5
-            """
-        )
-        try:
-            out, _ = run_collection_for_seconds(["--config-file", cfg_path], seconds=2.5)
-        finally:
-            try:
-                os.remove(cfg_path)
-            except OSError:
-                pass
-        self.assertIn("Machine ID:", out)
-        self.assertIn("9999", out)
-
-    def test_6_4_cli_overrides_machine_id_from_config(self):
-        """CLI --machine-id should override machine_id from config."""
-        cfg_path = _write_temp_config_ini(
-            """
-            [collection]
-            machine_id = 1111
-            sample_rate = 0.5
-            """
-        )
-        try:
-            out, _ = run_collection_for_seconds(
-                ["--config-file", cfg_path, "--machine-id", "1234", "--sample-rate", "0.5"],
-                seconds=3,
-            )
-        finally:
-            try:
-                os.remove(cfg_path)
-            except OSError:
-                pass
-        self.assertIn("Machine ID:", out)
-        self.assertIn("1234", out)
-        self.assertNotIn("1111", out)
 
     def test_6_5_auto_detect_config_from_script_dir(self):
         """config.ini in the script directory is auto-loaded when --config-file is not given."""

@@ -45,7 +45,6 @@ Options:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--sample-rate` | Sampling interval in seconds | `1.0` |
-| `--machine-id` | 4-digit identifier for this machine; if omitted, a 4-digit ID is derived from the NIC MAC address | Derived from NIC MAC (4 digits) |
 | `--config-file` | Path to INI config file providing default values for supported options | *(none)* |
 
 Log file is created automatically, using the pattern: `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv` (for example, `chrome_PID1234_20231025_100000_monitor.csv`). The log contains these columns: `Timestamp`, `CPU_Usage_%`, `Memory_MB`, `VMS_MB`, and `RSS_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
@@ -81,7 +80,6 @@ When you have soak logs from multiple machines (or multiple runs) and want a **s
 
 This prints a markdown table, one row per input CSV, with the following columns:
 
-- `Machine<br>ID`
 - `Start<br>Time`
 - `Duration`
 - `CPU(%)`
@@ -92,8 +90,6 @@ This prints a markdown table, one row per input CSV, with the following columns:
 - `RAM<br>R-Square`
 - `Flags`
 
-`machine_id` is inferred from a 4-digit token in the CSV filename when possible (for example, `node_1234_20231025_monitor.csv` → `1234`). If no such token is found, it falls back to the effective `--machine-id` value (from CLI, config, or the derived default).
-
 ### Config file (`config.ini`)
 
 - **Purpose**: Centralize default values for most CLI options.
@@ -102,7 +98,7 @@ This prints a markdown table, one row per input CSV, with the following columns:
   - Command-line arguments **override** values from `config.ini`.
   - `config.ini` values override built-in defaults.
 - **Config-managed options**:
-  - Collection: `sample_rate`, `machine_id`
+  - Collection: `sample_rate`
   - Analysis: `cpu_peak_percentage`, `ram_peak_percentage`
 - **CLI-only options (not stored in config)**:
   - `--parse-file`
@@ -120,7 +116,6 @@ Example `config.ini`:
 ```ini
 [collection]
 sample_rate = 1.0
-# machine_id =
 
 [analysis]
 cpu_peak_percentage = 90.0
