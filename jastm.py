@@ -8,6 +8,7 @@ import argparse
 import configparser
 import csv
 import glob
+import json
 import os
 import re
 import shlex
@@ -1458,6 +1459,10 @@ Examples:
   # Analysis Mode
   %(prog)s --parse-file 20231025_100000_monitor.csv --summary
   %(prog)s --parse-file 20231025_100000_monitor.csv --metrices-window
+
+  # Events Report Mode (Windows only)
+  %(prog)s --events-report
+  %(prog)s --events-report my_report.md
         """
     )
     
@@ -1492,6 +1497,11 @@ Examples:
                        help=f'Threshold percentage above average for CPU Peak detection (default: {DEFAULT_CPU_PEAK_PERCENTAGE})')
     parser.add_argument('--ram-peak-percentage', type=float,
                        help=f'Threshold percentage below average for RAM Peak detection (0-100, default: {DEFAULT_RAM_PEAK_PERCENTAGE})')
+    parser.add_argument('--events-report', nargs='?', const='', metavar='FILE',
+                       help='Generate a Markdown report of Windows Event Log entries '
+                            '(Warning, Error, Critical) from System and Application logs. '
+                            'Optionally specify output FILE path '
+                            '(default: events_report_YYYYMMDD_HHMMSS.md)')
     
     if len(sys.argv) == 1:
         parser.print_help()
@@ -1657,6 +1667,133 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     print()
 
 
+def _collect_windows_events(since_hours: float = 24.0):
+    """
+    Collect Windows Event Log entries from System and Application logs,
+    filtered to Warning (3), Error (2), and Critical (1) levels.
+    Returns a list of event dicts, or None on error.
+    Only supported on Windows.
+    """
+    if sys.platform != 'win32':
+        print("Error: --events-report is only supported on Windows.", file=sys.stderr)
+        return None
+
+    ps_script = (
+        "$since = (Get-Date).AddHours(-" + str(since_hours) + ");"
+        "try {"
+        "  $ev = Get-WinEvent -FilterHashtable @{LogName=@('System','Application'); StartTime=$since}"
+        "    -ErrorAction Stop |"
+        "    Where-Object {$_.Level -ge 1 -and $_.Level -le 3} |"
+        "    Sort-Object TimeCreated |"
+        "    Select-Object @{N='log';E={$_.LogName}},"
+        "      @{N='time';E={$_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')}},"
+        "      @{N='level';E={$_.Level}},"
+        "      @{N='provider';E={$_.ProviderName}},"
+        "      @{N='id';E={$_.Id}},"
+        "      @{N='message';E={[string]($_.Message -replace '\\r?\\n',' ')}};"
+        "  if ($ev) { $ev | ConvertTo-Json -Depth 1 -Compress } else { '[]' }"
+        "} catch { '[]' }"
+    )
+
+    try:
+        result = subprocess.run(
+            ["powershell", "-NonInteractive", "-NoProfile", "-Command", ps_script],
+            capture_output=True, text=True, timeout=120
+        )
+        output = result.stdout.strip()
+        if not output or output.lower() == "null":
+            return []
+        data = json.loads(output)
+        if isinstance(data, dict):
+            data = [data]
+        return data if data else []
+    except subprocess.TimeoutExpired:
+        print("Error: PowerShell query timed out.", file=sys.stderr)
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error: Failed to parse event data: {e}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"Error collecting Windows events: {e}", file=sys.stderr)
+        return None
+
+
+def generate_events_report(output_path: Optional[str] = None, since_hours: float = 24.0) -> None:
+    """Generate a Markdown report of Windows Event Log entries (Warning and above)."""
+    if not output_path:
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"events_report_{timestamp_str}.md"
+
+    print(f"Collecting Windows events (last {since_hours:.0f} hours)...")
+    events = _collect_windows_events(since_hours=since_hours)
+    if events is None:
+        sys.exit(1)
+
+    # Organise by log and level
+    LEVEL_NAMES = {1: "Critical", 2: "Error", 3: "Warning"}
+    organised: dict = {
+        "System": {1: [], 2: [], 3: []},
+        "Application": {1: [], 2: [], 3: []},
+    }
+    for ev in events:
+        log = ev.get("log", "")
+        level = ev.get("level")
+        if log in organised and level in organised[log]:
+            organised[log][level].append(ev)
+
+    # Build Markdown
+    lines = [
+        "# Windows Events Report",
+        "",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Time range: Last {since_hours:.0f} hours",
+        "",
+        "## Summary",
+        "",
+        "| Category | Critical | Error | Warning | Total |",
+        "| :--- | ---: | ---: | ---: | ---: |",
+    ]
+
+    for log_name in ("System", "Application"):
+        critical = len(organised[log_name][1])
+        error = len(organised[log_name][2])
+        warning = len(organised[log_name][3])
+        total = critical + error + warning
+        lines.append(f"| {log_name} | {critical} | {error} | {warning} | {total} |")
+
+    for log_name in ("System", "Application"):
+        lines.append("")
+        lines.append(f"## {log_name} Events")
+        for level_num in (1, 2, 3):
+            level_label = LEVEL_NAMES[level_num]
+            evs = organised[log_name][level_num]
+            lines.append("")
+            lines.append(f"### {level_label} ({len(evs)} events)")
+            lines.append("")
+            if not evs:
+                lines.append("_No events._")
+            else:
+                lines.append("| Time | Source | Event ID | Message |")
+                lines.append("| :--- | :--- | ---: | :--- |")
+                for ev in evs:
+                    ev_time = ev.get("time", "")
+                    provider = (ev.get("provider") or "").replace("|", "\\|")
+                    ev_id = ev.get("id", "")
+                    msg = (ev.get("message") or "").replace("|", "\\|")
+                    if len(msg) > 200:
+                        msg = msg[:200] + "…"
+                    lines.append(f"| {ev_time} | {provider} | {ev_id} | {msg} |")
+
+    lines.append("")
+    content = "\n".join(lines)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    total_events = sum(len(organised[ln][lv]) for ln in organised for lv in organised[ln])
+    print(f"Events report written to: {output_path} ({total_events} events)")
+
+
 def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict]) -> argparse.Namespace:
     """Merge CLI args with config file values and built-in defaults."""
     is_analysis_mode = bool(args.parse_file or getattr(args, "aggregate_summaries", None))
@@ -1716,7 +1853,13 @@ def main():
 
     # Convert RAM percentage to ratio
     ram_peak_ratio = args.ram_peak_percentage / 100.0
-    
+
+    # Events Report Mode
+    if getattr(args, "events_report", None) is not None:
+        output_path = args.events_report if args.events_report else None
+        generate_events_report(output_path=output_path)
+        return
+
     # Analysis Mode - single file
     if args.parse_file:
         analyzer = DataAnalyzer(args.parse_file, cpu_peak_criteria=args.cpu_peak_percentage, ram_peak_criteria=ram_peak_ratio)

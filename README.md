@@ -90,6 +90,23 @@ This prints a markdown table, one row per input CSV, with the following columns:
 - `RAM<br>R-Square`
 - `Warnings`
 
+### Events Report (Windows only)
+
+Collect all Warning, Error, and Critical events from the Windows Event Log (System and Application channels) over the last 24 hours and write them as a Markdown report.
+
+- **Auto-named output**:
+  `python jastm.py --events-report`
+  Writes to `events_report_YYYYMMDD_HHMMSS.md` in the current directory.
+
+- **Custom output path**:
+  `python jastm.py --events-report my_report.md`
+
+The report contains:
+- A summary table showing Critical / Error / Warning counts per channel.
+- Per-channel, per-level detail tables with columns: `Time`, `Source`, `Event ID`, `Message` (truncated to 200 characters).
+
+This mode requires no additional dependencies — it invokes PowerShell's `Get-WinEvent` internally.
+
 ### Config file (`config.ini`)
 
 - **Purpose**: Centralize default values for most CLI options.
