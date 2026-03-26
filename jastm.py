@@ -1572,7 +1572,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
     """
     Aggregate multiple CSV logs into a single markdown table for human review.
 
-    Columns: Start Time, Duration, CPU(%), CPU Peak,
+    Columns: Machine ID, Start Time, Duration, CPU(%), CPU Peak,
     RAM(MB), RAM Peak, RAM Slope, RAM R-Square, Flag.
     """
     rows = []
@@ -1584,6 +1584,8 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         if not analyzer.load_data():
             print(f"Warning: Skipping file due to load error: {path}", file=sys.stderr)
             continue
+
+        machine_id = os.path.splitext(os.path.basename(path))[0]
 
         if analyzer.timestamps:
             start_dt = analyzer.start_datetime + timedelta(seconds=analyzer.timestamps[0])
@@ -1626,6 +1628,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         warnings_str = ",".join(warnings)
 
         rows.append({
+            "machine_id": machine_id,
             "start_time": start_str,
             "duration": duration_label,
             "cpu_avg": cpu_avg,
@@ -1642,12 +1645,12 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         print("No valid data loaded for aggregation.")
         return
 
-    # Stable ordering: by start_time
-    rows.sort(key=lambda r: (r["start_time"], r["source"]))
+    # Stable ordering: by machine_id then start_time
+    rows.sort(key=lambda r: (r["machine_id"], r["start_time"], r["source"]))
 
     print("\n=== Aggregated Summary Report ===")
-    print("| Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope<br>(MB/h) | RAM<br>R-Square | Warnings |")
-    print("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
+    print("| Machine<br>ID | Start<br>Time | Duration | CPU(%) | CPU<br>Peak | RAM(MB) | RAM<br>Peak | RAM<br>Slope<br>(MB/h) | RAM<br>R-Square | Warnings |")
+    print("| :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
     for r in rows:
         if r["mem_slope"] is None or r["mem_r2"] is None:
             mem_slope_str = "NA"
@@ -1659,7 +1662,7 @@ def aggregate_summaries(filepaths, cpu_peak_criteria: float, ram_peak_criteria: 
         warnings_display = r["warnings"] if r["warnings"] else "-"
 
         print(
-            f"| {r['start_time']} | {r['duration']} | "
+            f"| {r['machine_id']} | {r['start_time']} | {r['duration']} | "
             f"{r['cpu_avg']:.2f} | {r['cpu_peak_count']} | "
             f"{r['mem_avg']:.2f} | {r['mem_peak_count']} | "
             f"{mem_slope_str} | {mem_r2_str} | {warnings_display} |"

@@ -567,6 +567,15 @@ class TestAnalysisMode(unittest.TestCase):
             f"Error should mention the missing file; got: {err!r}",
         )
 
+    def test_4_14_machine_id_inferred_from_filename(self):
+        """machine_id column should be the 4-digit token found in the CSV filename."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            named_csv = os.path.join(tmpdir, "node_5678_20231025_100000_monitor.csv")
+            shutil.copy(SAMPLE_CSV, named_csv)
+            code, out, err = run_jastm(["--aggregate-summaries", named_csv])
+        self.assertEqual(code, 0, err or out)
+        self.assertIn("5678", out + err, "machine_id should be inferred as '5678' from the filename")
+
     def test_4_15_summary_no_cpu_peaks(self):
         """Summary with a threshold above the data maximum should report no CPU peaks."""
         # smoke_sample.csv max CPU is 95.0, so threshold=99 yields zero peaks

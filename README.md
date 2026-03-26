@@ -80,6 +80,7 @@ When you have soak logs from multiple machines (or multiple runs) and want a **s
 
 This prints a markdown table, one row per input CSV, with the following columns:
 
+- `Machine<br>ID`
 - `Start<br>Time`
 - `Duration`
 - `CPU(%)`
