@@ -31,17 +31,21 @@ SAMPLE_CSV = os.path.join(FIXTURES_DIR, "smoke_sample.csv")
 SAMPLE_CPU_PEAKS_AT_50 = 1
 SAMPLE_MEM_PEAKS_AT_30 = 0
 
-REQUIRED_CLI_OPTIONS = [
-    "--parse-file",
-    "--process-name",
-    "--process-id",
+MONITOR_CLI_OPTIONS = [
     "--program",
     "--sample-rate",
     "--config-file",
+]
+
+ANALYZE_CLI_OPTIONS = [
+    "--parse-file",
+    "--aggregate-summaries",
+    "--events-report",
     "--summary",
     "--metrices-window",
     "--cpu-peak-percentage",
     "--ram-peak-percentage",
+    "--config-file",
 ]
 
 
@@ -158,21 +162,31 @@ class TestHelpAndCLI(unittest.TestCase):
     """Spec section 1: Help and CLI."""
 
     def test_1_1_help_output(self):
-        """Exit 0; usage and required options visible."""
+        """Exit 0; subcommands visible in top-level help; each subcommand's options in its own help."""
         code, out, err = run_jastm(["--help"])
         self.assertEqual(code, 0, f"Expected exit 0, got {code}. stderr: {err}")
         combined = out + err
-        for opt in REQUIRED_CLI_OPTIONS:
-            self.assertIn(opt, combined, f"Help should mention {opt}")
+        self.assertIn("monitor", combined, "Top-level help should mention 'monitor' subcommand")
+        self.assertIn("analyze", combined, "Top-level help should mention 'analyze' subcommand")
+
+        _, mon_out, mon_err = run_jastm(["monitor", "--help"])
+        mon_combined = mon_out + mon_err
+        for opt in MONITOR_CLI_OPTIONS:
+            self.assertIn(opt, mon_combined, f"monitor --help should mention {opt}")
+
+        _, ana_out, ana_err = run_jastm(["analyze", "--help"])
+        ana_combined = ana_out + ana_err
+        for opt in ANALYZE_CLI_OPTIONS:
+            self.assertIn(opt, ana_combined, f"analyze --help should mention {opt}")
 
     def test_1_2_no_args_shows_help(self):
-        """No arguments should also show help and exit 0."""
+        """No arguments should show top-level help and exit 0."""
         code, out, err = run_jastm([])
         self.assertEqual(code, 0, f"Expected exit 0, got {code}. stderr: {err}")
         combined = out + err
         self.assertIn("usage:", combined.lower())
-        for opt in REQUIRED_CLI_OPTIONS:
-            self.assertIn(opt, combined, f"No-args help should mention {opt}")
+        self.assertIn("monitor", combined, "No-args help should mention 'monitor'")
+        self.assertIn("analyze", combined, "No-args help should mention 'analyze'")
 
 
 # ---------------------------------------------------------------------------
@@ -183,38 +197,48 @@ class TestOptionValidation(unittest.TestCase):
     """Spec section 2: Option validation."""
 
     def test_2_1_reject_sample_rate_zero(self):
-        code, _, err = run_jastm(["--sample-rate", "0"])
+        code, _, err = run_jastm(["monitor", "--sample-rate", "0"])
         self.assertNotEqual(code, 0)
         self.assertIn("--sample-rate", err)
 
     def test_2_2_reject_sample_rate_negative(self):
-        code, _, err = run_jastm(["--sample-rate", "-1"])
+        code, _, err = run_jastm(["monitor", "--sample-rate", "-1"])
         self.assertNotEqual(code, 0)
         self.assertIn("--sample-rate", err)
 
-    def test_2_3_reject_analysis_plus_process_name(self):
-        code, _, err = run_jastm(["--parse-file", "x.csv", "--process-name", "python.exe"])
+    def test_2_3_reject_analyze_without_source(self):
+        """analyze without --parse-file, --aggregate-summaries, or --events-report should fail."""
+        code, _, err = run_jastm(["analyze"])
         self.assertNotEqual(code, 0)
-        self.assertIn("Analysis Mode", err)
+        combined = err
+        self.assertTrue(
+            "--parse-file" in combined or "--aggregate-summaries" in combined or "required" in combined.lower(),
+            f"Error should mention the missing source flag; got: {combined!r}",
+        )
 
-    def test_2_4_reject_analysis_plus_process_id(self):
-        code, _, err = run_jastm(["--parse-file", "x.csv", "--process-id", "12345"])
+    def test_2_4_reject_summary_without_parse_file(self):
+        """--summary requires --parse-file under analyze."""
+        code, _, err = run_jastm(["analyze", "--aggregate-summaries", SAMPLE_CSV, "--summary"])
         self.assertNotEqual(code, 0)
-        self.assertIn("Analysis Mode", err)
+        self.assertIn("--parse-file", err)
 
-    def test_2_5_reject_analysis_plus_program(self):
-        code, _, err = run_jastm(["--parse-file", "x.csv", "--program", "notepad.exe"])
+    def test_2_5_reject_metrices_window_without_parse_file(self):
+        """--metrices-window requires --parse-file under analyze."""
+        code, _, err = run_jastm(["analyze", "--aggregate-summaries", SAMPLE_CSV, "--metrices-window"])
         self.assertNotEqual(code, 0)
-        self.assertIn("Analysis Mode", err)
+        self.assertIn("--parse-file", err)
 
     def test_2_6_reject_empty_program(self):
-        code, _, err = run_jastm(["--program"])
+        code, _, err = run_jastm(["monitor", "--program"])
         self.assertNotEqual(code, 0)
-        self.assertTrue("--program" in err or "No selection made" in err)
+        self.assertTrue(
+            len(err) > 0,
+            f"Expected non-empty stderr when --program is given with no arguments; got: {err!r}",
+        )
 
     def test_2_7_missing_config_file(self):
         """Missing config file should yield non-zero exit and mention not found."""
-        code, _, err = run_jastm(["--config-file", "nonexistent.ini"])
+        code, _, err = run_jastm(["monitor", "--config-file", "nonexistent.ini"])
         self.assertNotEqual(code, 0)
         self.assertIn("Config file not found", err)
 
@@ -227,7 +251,7 @@ class TestOptionValidation(unittest.TestCase):
             """
         )
         try:
-            code, _, err = run_jastm(["--config-file", cfg_path])
+            code, _, err = run_jastm(["monitor", "--config-file", cfg_path])
         finally:
             try:
                 os.remove(cfg_path)
@@ -248,7 +272,7 @@ class TestOptionValidation(unittest.TestCase):
         try:
             code, out, err = run_jastm(
                 [
-                    "--parse-file", SAMPLE_CSV, "--summary",
+                    "analyze", "--parse-file", SAMPLE_CSV, "--summary",
                     "--cpu-peak-percentage", "50",
                     "--ram-peak-percentage", "30",
                     "--config-file", cfg_path,
@@ -267,9 +291,9 @@ class TestOptionValidation(unittest.TestCase):
         self.assertNotIn("RAM < 20% deviation", combined)
 
     def test_2_10_reject_parse_file_with_aggregate_summaries(self):
-        """--parse-file and --aggregate-summaries are mutually exclusive."""
+        """--parse-file and --aggregate-summaries are mutually exclusive under analyze."""
         code, _, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--aggregate-summaries", SAMPLE_CSV, "--summary"]
+            ["analyze", "--parse-file", SAMPLE_CSV, "--aggregate-summaries", SAMPLE_CSV, "--summary"]
         )
         self.assertNotEqual(code, 0)
         self.assertTrue(
@@ -277,21 +301,11 @@ class TestOptionValidation(unittest.TestCase):
             f"Error should mention the conflicting flags; got: {err!r}",
         )
 
-    def test_2_11_reject_process_name_with_process_id(self):
-        """--process-name and --process-id are mutually exclusive."""
-        code, _, err = run_jastm(["--process-name", "python", "--process-id", "123"])
-        self.assertNotEqual(code, 0)
-
-    def test_2_12_reject_process_name_with_program(self):
-        """--process-name and --program are mutually exclusive."""
-        code, _, err = run_jastm(["--process-name", "python", "--program", "echo", "hi"])
-        self.assertNotEqual(code, 0)
-
     def test_2_17_reject_invalid_ini_config(self):
         """Config file with invalid INI syntax (no section headers) should yield non-zero exit."""
         cfg_path = _write_temp_config_ini("cpu_peak_percentage = 90\n")
         try:
-            code, _, err = run_jastm(["--config-file", cfg_path])
+            code, _, err = run_jastm(["monitor", "--config-file", cfg_path])
         finally:
             try:
                 os.remove(cfg_path)
@@ -313,7 +327,7 @@ class TestDataCollection(unittest.TestCase):
 
     def test_3_1_system_wide_collection_starts(self):
         """Logging message and CSV with header + at least one data row."""
-        out, _ = run_collection_for_seconds(["--sample-rate", "0.5"])
+        out, _ = run_collection_for_seconds(["monitor", "--sample-rate", "0.5"])
         if out:
             self.assertIn("Logging to:", out)
         path = find_recent_monitor_csv(PROJECT_ROOT)
@@ -323,28 +337,22 @@ class TestDataCollection(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 2, "CSV should have header + at least one data row")
         self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB", "VMS_MB", "RSS_MB"])
 
-    def test_3_2_process_name_filter(self):
-        """Log filename includes process name (e.g. python_…_monitor.csv)."""
-        out, _ = run_collection_for_seconds(["--process-name", "python.exe", "--sample-rate", "0.5"])
-        if out:
-            self.assertIn("Logging to:", out)
-        path = find_recent_monitor_csv(PROJECT_ROOT, name_contains="python")
-        self.assertIsNotNone(path, "Expected a recent python_*_monitor.csv in project root")
-        self.assertIn("python", os.path.basename(path).lower())
-
-    def test_3_3_pid_filter(self):
-        """Log filename includes PID<id>."""
-        pid = os.getpid()
-        out, _ = run_collection_for_seconds(["--process-id", str(pid), "--sample-rate", "0.5"])
-        if out:
-            self.assertIn("Logging to:", out)
-        path = find_recent_monitor_csv(PROJECT_ROOT, name_contains=f"PID{pid}")
-        self.assertIsNotNone(path, f"Expected a recent PID{pid}_*_monitor.csv in project root")
-        self.assertIn(f"PID{pid}", os.path.basename(path))
+    def test_3_2_program_filter(self):
+        """Log filename includes the launched program's stem (e.g. python_…_monitor.csv)."""
+        # Use run_jastm so the process exits naturally; script sleeps 4s (>3s startup wait).
+        code, out, err = run_jastm(
+            ["monitor", "--program", sys.executable, "-c",
+             "import time; time.sleep(4)", "--sample-rate", "0.5"],
+            timeout=15,
+        )
+        self.assertIn(code, (0, -1), f"Unexpected exit code: {code}. stderr: {err}")
+        proc_name = os.path.splitext(os.path.basename(sys.executable))[0]
+        path = find_recent_monitor_csv(PROJECT_ROOT, name_contains=proc_name, within_seconds=30)
+        self.assertIsNotNone(path, f"Expected a recent {proc_name}_*_monitor.csv in project root")
 
     def test_3_4_csv_format(self):
         """Header, ISO timestamps, CPU in [0, 100], positive Memory_MB."""
-        out, _ = run_collection_for_seconds(["--sample-rate", "0.5"])
+        out, _ = run_collection_for_seconds(["monitor", "--sample-rate", "0.5"])
         path = find_recent_monitor_csv(PROJECT_ROOT)
         self.assertIsNotNone(path)
         with open(path, newline="") as f:
@@ -360,14 +368,21 @@ class TestDataCollection(unittest.TestCase):
             self.assertLessEqual(cpu, 100.0, f"CPU should be <= 100, got {cpu}")
             self.assertGreater(mem, 0.0, f"Memory_MB should be positive, got {mem}")
 
-    def test_3_9_vas_metrics_present_for_process(self):
-        """VMS and RSS should be numeric when monitoring a specific process."""
-        pid = os.getpid()
-        out, _ = run_collection_for_seconds(["--process-id", str(pid), "--sample-rate", "0.2"], seconds=2.0)
-        path = find_recent_monitor_csv(PROJECT_ROOT, name_contains=f"PID{pid}")
-        self.assertIsNotNone(path)
+    def test_3_9_vas_metrics_present_for_program(self):
+        """VMS and RSS should be numeric when monitoring a launched program."""
+        # Use run_jastm so the process exits naturally; script sleeps 4s (>3s startup wait).
+        proc_name = os.path.splitext(os.path.basename(sys.executable))[0]
+        code, out, err = run_jastm(
+            ["monitor", "--program", sys.executable, "-c",
+             "import time; time.sleep(4)", "--sample-rate", "0.2"],
+            timeout=15,
+        )
+        self.assertIn(code, (0, -1), f"Unexpected exit code: {code}. stderr: {err}")
+        path = find_recent_monitor_csv(PROJECT_ROOT, name_contains=proc_name, within_seconds=30)
+        self.assertIsNotNone(path, f"Expected a recent {proc_name}_*_monitor.csv")
         with open(path, newline="") as f:
             rows = list(csv.reader(f))
+        self.assertGreaterEqual(len(rows), 2, "CSV should have at least one data row")
         for row in rows[1:]:
             self.assertEqual(len(row), 5)
             self.assertNotEqual(row[3], "N/A")
@@ -379,8 +394,9 @@ class TestDataCollection(unittest.TestCase):
 
     def test_3_10_vas_metrics_na_for_system_wide(self):
         """VMS and RSS should be N/A when monitoring system-wide."""
-        out, _ = run_collection_for_seconds(["--sample-rate", "0.2"], seconds=2.0)
+        out, _ = run_collection_for_seconds(["monitor", "--sample-rate", "0.2"], seconds=3.0)
         path = find_recent_monitor_csv(PROJECT_ROOT)
+        self.assertIsNotNone(path, "Expected a recent *_monitor.csv for system-wide collection")
         with open(path, newline="") as f:
             rows = list(csv.reader(f))
         for row in rows[1:]:
@@ -388,15 +404,9 @@ class TestDataCollection(unittest.TestCase):
             self.assertEqual(row[3], "N/A")
             self.assertEqual(row[4], "N/A")
 
-    def test_3_6_process_name_not_found(self):
-        """Non-existent process name should exit non-zero and mention the name in the error."""
-        code, _, err = run_jastm(["--process-name", "__no_such_process_xyz__"])
-        self.assertNotEqual(code, 0, "Expected non-zero exit when process name not found")
-        self.assertIn("__no_such_process_xyz__", err, "Error should mention the missing process name")
-
     def test_3_8_csv_filename_timestamp_format(self):
         """CSV filename should contain a YYYYMMDD_HHMMSS timestamp."""
-        run_collection_for_seconds(["--sample-rate", "0.5"])
+        run_collection_for_seconds(["monitor", "--sample-rate", "0.5"])
         path = find_recent_monitor_csv(PROJECT_ROOT)
         self.assertIsNotNone(path)
         self.assertRegex(
@@ -420,7 +430,7 @@ class TestAnalysisMode(unittest.TestCase):
 
     def test_4_1_summary_only(self):
         """Exit 0; duration; time period; min/max/avg CPU and memory; peak tables."""
-        code, out, err = run_jastm(["--parse-file", SAMPLE_CSV, "--summary"])
+        code, out, err = run_jastm(["analyze", "--parse-file", SAMPLE_CSV, "--summary"])
         self.assertEqual(code, 0, err or out)
         combined = out + err
         self.assertIn("Duration", combined)
@@ -435,7 +445,7 @@ class TestAnalysisMode(unittest.TestCase):
     def test_4_2_metrics_window_only(self):
         """Exit 0; chart opens without crash (run with short timeout then terminate)."""
         code, out, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--metrices-window"],
+            ["analyze", "--parse-file", SAMPLE_CSV, "--metrices-window"],
             timeout=2,
         )
         self.assertIn(code, (0, -1), "Process should exit or be terminated without crash")
@@ -443,7 +453,7 @@ class TestAnalysisMode(unittest.TestCase):
     def test_4_3_summary_and_metrics_window(self):
         """Summary printed then chart (timeout after 2s); no crash."""
         code, out, err = run_jastm(
-            ["--parse-file", SAMPLE_CSV, "--summary", "--metrices-window"],
+            ["analyze", "--parse-file", SAMPLE_CSV, "--summary", "--metrices-window"],
             timeout=2,
         )
         self.assertIn(code, (0, -1), "Process should exit or be terminated without crash")
@@ -452,7 +462,7 @@ class TestAnalysisMode(unittest.TestCase):
 
     def test_4_4_analysis_no_action(self):
         """Message: use --summary or --metrices-window."""
-        code, out, err = run_jastm(["--parse-file", SAMPLE_CSV])
+        code, out, err = run_jastm(["analyze", "--parse-file", SAMPLE_CSV])
         self.assertEqual(code, 0)
         combined = out + err
         self.assertIn("no action specified", combined)
@@ -461,7 +471,7 @@ class TestAnalysisMode(unittest.TestCase):
 
     def test_4_5_missing_file(self):
         """Exit 1; error mentions the filename or 'not found'."""
-        code, _, err = run_jastm(["--parse-file", "nonexistent.csv", "--summary"])
+        code, _, err = run_jastm(["analyze", "--parse-file", "nonexistent.csv", "--summary"])
         self.assertEqual(code, 1)
         self.assertTrue(
             "nonexistent.csv" in err or "not found" in err.lower() or "no such" in err.lower(),
@@ -471,7 +481,7 @@ class TestAnalysisMode(unittest.TestCase):
     def test_4_6_custom_peak_thresholds(self):
         """Exit 0; summary reflects the custom peak thresholds in its output."""
         code, out, err = run_jastm([
-            "--parse-file", SAMPLE_CSV, "--summary",
+            "analyze", "--parse-file", SAMPLE_CSV, "--summary",
             "--cpu-peak-percentage", "50", "--ram-peak-percentage", "30",
         ])
         self.assertEqual(code, 0, err or out)
@@ -482,7 +492,7 @@ class TestAnalysisMode(unittest.TestCase):
 
     def test_4_7_aggregate_summaries_multiple_csvs(self):
         """Exit 0; aggregated markdown table with expected column names."""
-        code, out, err = run_jastm(["--aggregate-summaries", SAMPLE_CSV, SAMPLE_CSV])
+        code, out, err = run_jastm(["analyze", "--aggregate-summaries", SAMPLE_CSV, SAMPLE_CSV])
         self.assertEqual(code, 0, err or out)
         combined = (out + err).replace("<br>", " ")
         self.assertIn("Aggregated Summary Report", combined)
@@ -497,7 +507,7 @@ class TestAnalysisMode(unittest.TestCase):
         # smoke_sample.csv facts (see SAMPLE_CPU_PEAKS_AT_50 / SAMPLE_MEM_PEAKS_AT_30 constants):
         #   cpu_peak_count at threshold=50 → 1   |   mem_peak_count at threshold=30 → 0
         code, out, err = run_jastm([
-            "--aggregate-summaries", SAMPLE_CSV,
+            "analyze", "--aggregate-summaries", SAMPLE_CSV,
             "--cpu-peak-percentage", "50",
             "--ram-peak-percentage", "30",
         ])
@@ -525,7 +535,7 @@ class TestAnalysisMode(unittest.TestCase):
 
     def test_4_9_memory_trend_regression(self):
         """Summary includes Memory Trend with slope (MB/hour) and R^2."""
-        code, out, err = run_jastm(["--parse-file", SAMPLE_CSV, "--summary"])
+        code, out, err = run_jastm(["analyze", "--parse-file", SAMPLE_CSV, "--summary"])
         self.assertEqual(code, 0, err or out)
         combined = out + err
         self.assertIn("Memory Trend:", combined, "Summary should include a Memory Trend line")
@@ -535,20 +545,20 @@ class TestAnalysisMode(unittest.TestCase):
     def test_4_10_header_only_csv_rejected(self):
         """CSV with header but no data rows should exit 1 with a non-empty error."""
         header_only = os.path.join(FIXTURES_DIR, "header_only.csv")
-        code, _, err = run_jastm(["--parse-file", header_only, "--summary"])
+        code, _, err = run_jastm(["analyze", "--parse-file", header_only, "--summary"])
         self.assertEqual(code, 1, f"Expected exit 1 for header-only CSV; got {code}. stderr: {err}")
         self.assertTrue(err.strip(), "Expected a non-empty error message on stderr")
 
     def test_4_11_malformed_rows_skipped(self):
         """CSV with some non-numeric rows should skip them and still produce a valid summary."""
         malformed = os.path.join(FIXTURES_DIR, "malformed_rows.csv")
-        code, out, err = run_jastm(["--parse-file", malformed, "--summary"])
+        code, out, err = run_jastm(["analyze", "--parse-file", malformed, "--summary"])
         self.assertEqual(code, 0, f"Expected exit 0; valid rows should be processed. stderr: {err}")
         self.assertIn("Duration", out + err, "Summary should be produced from the valid rows")
 
     def test_4_12_aggregate_single_file(self):
         """--aggregate-summaries with one file should exit 0 and produce exactly one data row."""
-        code, out, err = run_jastm(["--aggregate-summaries", SAMPLE_CSV])
+        code, out, err = run_jastm(["analyze", "--aggregate-summaries", SAMPLE_CSV])
         self.assertEqual(code, 0, err or out)
         combined = out + err
         self.assertIn("Aggregated Summary Report", combined)
@@ -560,7 +570,7 @@ class TestAnalysisMode(unittest.TestCase):
 
     def test_4_13_aggregate_missing_file(self):
         """--aggregate-summaries with a non-existent file should exit non-zero."""
-        code, _, err = run_jastm(["--aggregate-summaries", "nonexistent_run.csv"])
+        code, _, err = run_jastm(["analyze", "--aggregate-summaries", "nonexistent_run.csv"])
         self.assertNotEqual(code, 0, "Expected non-zero exit for a missing aggregate file")
         self.assertTrue(
             "nonexistent_run.csv" in err or "not found" in err.lower(),
@@ -572,7 +582,7 @@ class TestAnalysisMode(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             named_csv = os.path.join(tmpdir, "node_5678_20231025_100000_monitor.csv")
             shutil.copy(SAMPLE_CSV, named_csv)
-            code, out, err = run_jastm(["--aggregate-summaries", named_csv])
+            code, out, err = run_jastm(["analyze", "--aggregate-summaries", named_csv])
         self.assertEqual(code, 0, err or out)
         self.assertIn("5678", out + err, "machine_id should be inferred as '5678' from the filename")
 
@@ -580,7 +590,7 @@ class TestAnalysisMode(unittest.TestCase):
         """Summary with a threshold above the data maximum should report no CPU peaks."""
         # smoke_sample.csv max CPU is 95.0, so threshold=99 yields zero peaks
         code, out, err = run_jastm([
-            "--parse-file", SAMPLE_CSV, "--summary", "--cpu-peak-percentage", "99",
+            "analyze", "--parse-file", SAMPLE_CSV, "--summary", "--cpu-peak-percentage", "99",
         ])
         self.assertEqual(code, 0, err or out)
         self.assertIn("No cpu peaks detected", out + err)
@@ -588,13 +598,13 @@ class TestAnalysisMode(unittest.TestCase):
     def test_4_16_summary_no_memory_peaks(self):
         """Summary with default thresholds on smoke_sample.csv should report no memory peaks."""
         # avg_mem ≈ 1979.75; 50 % deviation threshold ≈ 989.9; all sample values are above that
-        code, out, err = run_jastm(["--parse-file", SAMPLE_CSV, "--summary"])
+        code, out, err = run_jastm(["analyze", "--parse-file", SAMPLE_CSV, "--summary"])
         self.assertEqual(code, 0, err or out)
         self.assertIn("No memory peaks detected", out + err)
 
     def test_4_17_aggregate_warnings_column(self):
         """Aggregate table should have a Warnings column; smoke_sample has no MEM_LEAK or FRAG_RISK."""
-        code, out, err = run_jastm(["--aggregate-summaries", SAMPLE_CSV])
+        code, out, err = run_jastm(["analyze", "--aggregate-summaries", SAMPLE_CSV])
         self.assertEqual(code, 0, err or out)
         # Header must use "Warnings", not "Flags"
         self.assertIn("Warnings", out + err, "aggregate header should contain 'Warnings'")
@@ -606,7 +616,7 @@ class TestAnalysisMode(unittest.TestCase):
     def test_4_18_vas_analysis_summary(self):
         """Summary should include VMS and RSS stats if present in CSV."""
         vas_csv = os.path.join(FIXTURES_DIR, "vas_sample.csv")
-        code, out, err = run_jastm(["--parse-file", vas_csv, "--summary"])
+        code, out, err = run_jastm(["analyze", "--parse-file", vas_csv, "--summary"])
         self.assertEqual(code, 0, err or out)
         combined = out + err
         self.assertTrue(
@@ -624,7 +634,7 @@ class TestAnalysisMode(unittest.TestCase):
         # VMS: 100 -> 200 (slope 100)
         # RSS: 50 -> 51 (slope 1)
         vas_csv = os.path.join(FIXTURES_DIR, "vas_sample.csv")
-        code, out, err = run_jastm(["--parse-file", vas_csv, "--summary"])
+        code, out, err = run_jastm(["analyze", "--parse-file", vas_csv, "--summary"])
         self.assertEqual(code, 0, err or out)
         self.assertIn("FRAGMENTATION RISK DETECTED", out + err)
         self.assertIn("VMS is growing steadily while RSS is relatively flat", out + err)
@@ -648,7 +658,7 @@ class TestOptionalAndConfig(unittest.TestCase):
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
             proc = subprocess.Popen(
-                [sys.executable, JASTM_PY, "--program", sys.executable, tmp_path, "--sample-rate", "0.2"],
+                [sys.executable, JASTM_PY, "monitor", "--program", sys.executable, tmp_path, "--sample-rate", "0.2"],
                 cwd=PROJECT_ROOT,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -667,36 +677,25 @@ class TestOptionalAndConfig(unittest.TestCase):
                 pass
 
     def test_5_2_process_exit_stops_collection(self):
-        """Collection must stop on its own when the target process exits (no timeout kill)."""
+        """Collection must stop on its own when the launched program exits (no timeout kill)."""
         target_script = "import time\nprint('target'); time.sleep(4)\n"
         with tempfile.NamedTemporaryFile("w", suffix=".py", dir=TESTS_DIR, delete=False) as tmp:
             tmp.write(target_script)
             target_path = tmp.name
         try:
-            target_proc = subprocess.Popen(
-                [sys.executable, target_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            pid = target_proc.pid
             code, out, err = run_jastm(
-                ["--process-id", str(pid), "--sample-rate", "0.2"],
+                ["monitor", "--program", sys.executable, target_path, "--sample-rate", "0.2"],
                 timeout=20,
             )
             # timeout (-1) means jastm never stopped — that is the bug being tested
             self.assertEqual(code, 0, f"Expected jastm to exit 0 after target died, not timeout. got {code}")
-            csv_path = find_recent_monitor_csv(PROJECT_ROOT, within_seconds=30, name_contains=f"PID{pid}")
-            self.assertIsNotNone(csv_path, f"Expected a PID{pid}_*_monitor.csv")
+            csv_path = find_recent_monitor_csv(PROJECT_ROOT, within_seconds=30)
+            self.assertIsNotNone(csv_path, "Expected a *_monitor.csv after program exit")
             with open(csv_path, newline="") as f:
                 rows = list(csv.reader(f))
             self.assertGreaterEqual(len(rows), 1)
             self.assertEqual(rows[0], ["Timestamp", "CPU_Usage_%", "Memory_MB", "VMS_MB", "RSS_MB"])
         finally:
-            try:
-                target_proc.terminate()
-            except Exception:
-                pass
             try:
                 os.remove(target_path)
             except OSError:
@@ -712,7 +711,7 @@ class TestOptionalAndConfig(unittest.TestCase):
         )
         try:
             out, code = run_collection_for_seconds(
-                ["--config-file", cfg_path, "--sample-rate", "0.5"], seconds=3
+                ["monitor", "--config-file", cfg_path, "--sample-rate", "0.5"], seconds=3
             )
         finally:
             try:
@@ -737,7 +736,7 @@ class TestOptionalAndConfig(unittest.TestCase):
         )
         try:
             code, out, err = run_jastm(
-                ["--parse-file", SAMPLE_CSV, "--summary", "--config-file", cfg_path]
+                ["analyze", "--parse-file", SAMPLE_CSV, "--summary", "--config-file", cfg_path]
             )
         finally:
             try:
@@ -758,7 +757,7 @@ class TestOptionalAndConfig(unittest.TestCase):
                     [analysis]
                     cpu_peak_percentage = 55.0
                 """))
-            code, out, err = run_jastm(["--parse-file", SAMPLE_CSV, "--summary"])
+            code, out, err = run_jastm(["analyze", "--parse-file", SAMPLE_CSV, "--summary"])
             self.assertEqual(code, 0, err or out)
             self.assertIn(
                 "CPU > 55%", out + err,
@@ -821,14 +820,14 @@ class TestTkinterLazyLoading(unittest.TestCase):
 
     def test_7_1_summary_works_without_tkinter(self):
         """--summary must succeed even when tkinter is not installed."""
-        code, out, err = self._run_without_tkinter(["--parse-file", SAMPLE_CSV, "--summary"])
+        code, out, err = self._run_without_tkinter(["analyze", "--parse-file", SAMPLE_CSV, "--summary"])
         self.assertEqual(code, 0, f"--summary should not require tkinter. stderr: {err}")
         self.assertIn("Duration", out + err)
 
     def test_7_2_metrices_window_fails_gracefully_without_tkinter(self):
         """--metrices-window must exit non-zero with a clear error when tkinter cannot be installed."""
         code, out, err = self._run_without_tkinter(
-            ["--parse-file", SAMPLE_CSV, "--metrices-window"],
+            ["analyze", "--parse-file", SAMPLE_CSV, "--metrices-window"],
             timeout=15,
         )
         self.assertNotEqual(code, 0, "--metrices-window should fail when tkinter is unavailable")

@@ -4,8 +4,8 @@ Just Another Soak Testing Monitor — real-time system monitoring and post-run a
 
 ## Overview
 
-- **Data Collection Mode**: Samples CPU and memory at a configurable interval, optionally scoped to a process (by name, PID, or launched program). Writes a CSV log and supports an optional in-process GUI for live charts.
-- **Analysis Mode**: Loads a collected CSV, computes statistics and peak detection, and optionally shows a summary report and/or an interactive metrics chart.
+- **`monitor` subcommand**: Samples CPU and memory at a configurable interval, optionally launching and scoping to a specific program. Writes a CSV log for later analysis.
+- **`analyze` subcommand**: Loads collected CSVs, computes statistics and peak detection, aggregates multiple runs into a summary table, or generates a Windows Event Log report.
 
 ## Project structure
 
@@ -29,84 +29,66 @@ pip install psutil matplotlib
 
 ## Usage
 
-### Data collection (soak run)
+### `monitor` — collect metrics
 
-- **System-wide** (no process filter):  
-  `python jastm.py`
-- **By process name**:  
-  `python jastm.py --process-name "python.exe"`
-- **By PID**:  
-  `python jastm.py --process-id 12345`
-- **Launch and monitor a program**:  
-  `python jastm.py --program myapp.exe [args...]`
+- **System-wide** (no process filter):
+  `python jastm.py monitor`
+- **Launch and monitor a specific program**:
+  `python jastm.py monitor --program myapp.exe [args...]`
 
-Options:
+`monitor` options:
 
 | Option | Description | Default |
 |--------|-------------|---------|
+| `--program` | Program command to launch and monitor | *(none — system-wide)* |
 | `--sample-rate` | Sampling interval in seconds | `1.0` |
-| `--config-file` | Path to INI config file providing default values for supported options | *(none)* |
+| `--config-file` | Path to INI config file | *(auto-detected)* |
 
-Log file is created automatically, using the pattern: `{process_name|PID{id}|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv` (for example, `chrome_PID1234_20231025_100000_monitor.csv`). The log contains these columns: `Timestamp`, `CPU_Usage_%`, `Memory_MB`, `VMS_MB`, and `RSS_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
+Log file is created automatically using the pattern `{program_stem|timestamp}_{YYYYMMDD_HHMMSS}_monitor.csv`. The log contains these columns: `Timestamp`, `CPU_Usage_%`, `Memory_MB`, `VMS_MB`, and `RSS_MB`. Data collection stops after 10 consecutive metric failures (such as process exit).
 
-### Analysis (post-run)
+### `analyze` — post-run analysis
 
-- **Summary only**:  
-  `python jastm.py --parse-file 20231025_100000_monitor.csv --summary`
-- **Interactive chart**:  
-  `python jastm.py --parse-file 20231025_100000_monitor.csv --metrices-window`
+**Single file summary or chart:**
+
+- **Summary only**:
+  `python jastm.py analyze --parse-file 20231025_100000_monitor.csv --summary`
+- **Interactive chart**:
+  `python jastm.py analyze --parse-file 20231025_100000_monitor.csv --metrices-window`
 - **Both**: use `--summary` and `--metrices-window` together.
 
-Analysis options:
+**Aggregate multiple runs:**
+
+When you have soak logs from multiple machines (or multiple runs) and want a **single, human-readable overview**:
+
+- `python jastm.py analyze --aggregate-summaries machineA_20231025_100000_monitor.csv machineB_20231025_110000_monitor.csv`
+- `python jastm.py analyze --aggregate-summaries *.csv --cpu-peak-percentage 80 --ram-peak-percentage 40`
+
+This prints a markdown table, one row per input CSV, with the following columns: `Machine ID`, `Start Time`, `Duration`, `CPU(%)`, `CPU Peak`, `RAM(MB)`, `RAM Peak`, `RAM Slope`, `RAM R-Square`, `Warnings`.
+
+**Events Report (Windows only):**
+
+Collect all Warning, Error, and Critical events from the Windows Event Log (System and Application channels) over the last 24 hours:
+
+- **Auto-named output**:
+  `python jastm.py analyze --events-report`
+  Writes to `events_report_YYYYMMDD_HHMMSS.md` in the current directory.
+- **Custom output path**:
+  `python jastm.py analyze --events-report my_report.md`
+
+`analyze` options:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--cpu-peak-percentage` | CPU peak = value above average by this % (e.g. 90 → 1.9× avg) | `90.0` |
-| `--ram-peak-percentage` | Memory “peak” = available MB below average by this % (0–100) | `50.0` |
+| `--parse-file` | Input CSV file to analyse | — |
+| `--aggregate-summaries` | One or more CSV files to aggregate | — |
+| `--events-report` | Generate Windows Event Log Markdown report | — |
+| `--summary` | Show text summary (requires `--parse-file`) | — |
+| `--metrices-window` | Open interactive chart (requires `--parse-file`) | — |
+| `--cpu-peak-percentage` | CPU peak threshold (%) | `90.0` |
+| `--ram-peak-percentage` | Memory peak threshold, deviation % (0–100) | `50.0` |
+| `--config-file` | Path to INI config file | *(auto-detected)* |
 
-`--parse-file` cannot be combined with `--process-name`, `--process-id`, or `--program`.
-
-`--config-file` applies to both collection and analysis options; see **Config file (`config.ini`)**.
-
-#### Aggregating multiple runs
-
-When you have soak logs from multiple machines (or multiple runs) and want a **single, human-readable overview**, use `--aggregate-summaries` with one or more CSV files:
-
-- **Aggregate across several CSV logs**:  
-  `python jastm.py --aggregate-summaries machineA_20231025_100000_monitor.csv machineB_20231025_110000_monitor.csv`
-
-- **With custom peak thresholds** (applied uniformly to all inputs):  
-  `python jastm.py --aggregate-summaries *.csv --cpu-peak-percentage 80 --ram-peak-percentage 40`
-
-This prints a markdown table, one row per input CSV, with the following columns:
-
-- `Machine<br>ID`
-- `Start<br>Time`
-- `Duration`
-- `CPU(%)`
-- `CPU<br>Peak`
-- `RAM(MB)`
-- `RAM<br>Peak`
-- `RAM<br>Slope`
-- `RAM<br>R-Square`
-- `Warnings`
-
-### Events Report (Windows only)
-
-Collect all Warning, Error, and Critical events from the Windows Event Log (System and Application channels) over the last 24 hours and write them as a Markdown report.
-
-- **Auto-named output**:
-  `python jastm.py --events-report`
-  Writes to `events_report_YYYYMMDD_HHMMSS.md` in the current directory.
-
-- **Custom output path**:
-  `python jastm.py --events-report my_report.md`
-
-The report contains:
-- A summary table showing Critical / Error / Warning counts per channel.
-- Per-channel, per-level detail tables with columns: `Time`, `Source`, `Event ID`, `Message` (truncated to 200 characters).
-
-This mode requires no additional dependencies — it invokes PowerShell's `Get-WinEvent` internally.
+`--parse-file`, `--aggregate-summaries`, and `--events-report` are mutually exclusive.
 
 ### Config file (`config.ini`)
 
@@ -119,14 +101,11 @@ This mode requires no additional dependencies — it invokes PowerShell's `Get-W
   - Collection: `sample_rate`
   - Analysis: `cpu_peak_percentage`, `ram_peak_percentage`
 - **CLI-only options (not stored in config)**:
-  - `--parse-file`
-  - `--summary`
-  - `--metrices-window`
-  - `--process-name`
-  - `--process-id`
+  - `--parse-file`, `--aggregate-summaries`, `--events-report`
+  - `--summary`, `--metrices-window`
   - `--program`
-- **Analysis mode behavior**:
-  - When `--parse-file` is used, collection settings from `config.ini` are ignored.
+- **`analyze` subcommand behavior**:
+  - Collection settings from `config.ini` are ignored.
   - Analysis thresholds from `config.ini` still apply unless overridden on the CLI.
 
 Example `config.ini`:
@@ -140,7 +119,7 @@ cpu_peak_percentage = 90.0
 ram_peak_percentage = 50.0
 ```
 
-Empty or commented-out values are treated as not set. Process targeting (`--process-name`, `--process-id`, `--program`) is CLI-only and cannot be set in the config file.
+Empty or commented-out values are treated as not set. Process targeting (`--program`) is CLI-only and cannot be set in the config file.
 
 ## Collected metrics
 
@@ -204,7 +183,7 @@ JASTM includes an automated testing suite under the `tests/` directory to ensure
 
 To run the tests:
 
-- **Happy Path Tests** (`tests/happy_path.py`): Verifies the core, end-to-end workflows (system-wide monitoring, process filtering, launching a program, generating summaries, aggregating multiple CSVs, and parsing config overrides). Run it via:
+- **Happy Path Tests** (`tests/happy_path.py`): Verifies the core, end-to-end workflows (system-wide monitoring, launching a program, generating summaries, and aggregating multiple CSVs). Run it via:
   ```bash
   python tests/happy_path.py
   ```

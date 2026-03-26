@@ -1451,69 +1451,78 @@ def parse_arguments():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Data Collection Mode
-  %(prog)s
-  %(prog)s --process-name "python.exe"
-  %(prog)s --program myapp.exe
-  
-  # Analysis Mode
-  %(prog)s --parse-file 20231025_100000_monitor.csv --summary
-  %(prog)s --parse-file 20231025_100000_monitor.csv --metrices-window
+  # Monitor Mode
+  %(prog)s monitor
+  %(prog)s monitor --program myapp.exe
+
+  # Analyze Mode
+  %(prog)s analyze --parse-file 20231025_100000_monitor.csv --summary
+  %(prog)s analyze --parse-file 20231025_100000_monitor.csv --metrices-window
+  %(prog)s analyze --aggregate-summaries run1.csv run2.csv
 
   # Events Report Mode (Windows only)
-  %(prog)s --events-report
-  %(prog)s --events-report my_report.md
+  %(prog)s analyze --events-report
+  %(prog)s analyze --events-report my_report.md
         """
     )
-    
-    # Analysis Arguments
-    parser.add_argument('--parse-file', type=str,
-                           help='Input CSV file for analysis (switches to Analysis Mode)')
-    parser.add_argument('--aggregate-summaries', metavar='CSV', nargs='+',
-                       help='Aggregate summary table from multiple CSV log files (Analysis Mode only)')
-    
-    # Collection Arguments (Process identification)
-    # Mutually exclusive group for process selection
-    process_group = parser.add_mutually_exclusive_group(required=False)
-    process_group.add_argument('--process-name', type=str,
-                               help='Name of the process to monitor')
-    process_group.add_argument('--process-id', type=int,
-                               help='PID of the process to monitor')
-    process_group.add_argument('--program', type=str, nargs=argparse.REMAINDER,
-                               help='Program command to launch and monitor (command and arguments)')
-    
-    # General Options
-    parser.add_argument('--sample-rate', type=float,
-                       help=f'Sampling interval in seconds (default: {DEFAULT_SAMPLE_RATE}, Collection Mode only)')
-    parser.add_argument('--config-file', type=str,
-                       help='Path to INI config file providing default option values')
-    
-    # Analysis Options
-    parser.add_argument('--summary', action='store_true',
-                       help='Show summary report (Analysis Mode only)')
-    parser.add_argument('--metrices-window', action='store_true',
-                       help='Open visualization tool (Analysis Mode only)')
-    parser.add_argument('--cpu-peak-percentage', type=float,
-                       help=f'Threshold percentage above average for CPU Peak detection (default: {DEFAULT_CPU_PEAK_PERCENTAGE})')
-    parser.add_argument('--ram-peak-percentage', type=float,
-                       help=f'Threshold percentage below average for RAM Peak detection (0-100, default: {DEFAULT_RAM_PEAK_PERCENTAGE})')
-    parser.add_argument('--events-report', nargs='?', const='', metavar='FILE',
-                       help='Generate a Markdown report of Windows Event Log entries '
-                            '(Warning, Error, Critical) from System and Application logs. '
-                            'Optionally specify output FILE path '
-                            '(default: events_report_YYYYMMDD_HHMMSS.md)')
-    
-    if len(sys.argv) == 1:
+
+    subparsers = parser.add_subparsers(dest='command', metavar='COMMAND')
+
+    # --- monitor subcommand ---
+    mon = subparsers.add_parser(
+        'monitor',
+        help='Collect CPU/memory metrics for a program or system-wide',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    mon.add_argument('--program', type=str, nargs=argparse.REMAINDER,
+                     help='Program command to launch and monitor (command and arguments)')
+    mon.add_argument('--sample-rate', type=float,
+                     help=f'Sampling interval in seconds (default: {DEFAULT_SAMPLE_RATE})')
+    mon.add_argument('--config-file', type=str,
+                     help='Path to INI config file providing default option values')
+
+    # --- analyze subcommand ---
+    ana = subparsers.add_parser(
+        'analyze',
+        help='Analyse existing CSV logs or generate a Windows Event Log report',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    ana_src = ana.add_mutually_exclusive_group()
+    ana_src.add_argument('--parse-file', type=str,
+                         help='Input CSV file to analyse')
+    ana_src.add_argument('--aggregate-summaries', metavar='CSV', nargs='+',
+                         help='Aggregate summary table from multiple CSV log files')
+    ana_src.add_argument('--events-report', nargs='?', const='', metavar='FILE',
+                         help='Generate a Markdown report of Windows Event Log entries '
+                              '(Warning, Error, Critical) from System and Application logs. '
+                              'Optionally specify output FILE path '
+                              '(default: events_report_YYYYMMDD_HHMMSS.md)')
+    ana.add_argument('--summary', action='store_true',
+                     help='Show summary report (requires --parse-file)')
+    ana.add_argument('--metrices-window', action='store_true',
+                     help='Open visualization tool (requires --parse-file)')
+    ana.add_argument('--cpu-peak-percentage', type=float,
+                     help=f'Threshold percentage above average for CPU Peak detection (default: {DEFAULT_CPU_PEAK_PERCENTAGE})')
+    ana.add_argument('--ram-peak-percentage', type=float,
+                     help=f'Threshold percentage below average for RAM Peak detection (0-100, default: {DEFAULT_RAM_PEAK_PERCENTAGE})')
+    ana.add_argument('--config-file', type=str,
+                     help='Path to INI config file providing default option values')
+
+    args = parser.parse_args()
+
+    if args.command is None:
         parser.print_help()
         sys.exit(0)
-    
-    args = parser.parse_args()
-    
-    if (args.parse_file or args.aggregate_summaries) and (args.process_name or args.process_id or args.program):
-        parser.error("Cannot specify process/program when in Analysis Mode (--parse-file or --aggregate-summaries)")
-    if args.parse_file and args.aggregate_summaries:
-        parser.error("Cannot use --parse-file and --aggregate-summaries together")
-        
+
+    if args.command == 'analyze':
+        no_source = (not args.parse_file
+                     and args.aggregate_summaries is None
+                     and getattr(args, 'events_report', None) is None)
+        if no_source:
+            ana.error("one of --parse-file, --aggregate-summaries, or --events-report is required")
+        if (args.summary or args.metrices_window) and not args.parse_file:
+            ana.error("--summary and --metrices-window require --parse-file")
+
     return args
 
 
@@ -1799,35 +1808,31 @@ def generate_events_report(output_path: Optional[str] = None, since_hours: float
 
 def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict]) -> argparse.Namespace:
     """Merge CLI args with config file values and built-in defaults."""
-    is_analysis_mode = bool(args.parse_file or getattr(args, "aggregate_summaries", None))
+    is_analyze = args.command == 'analyze'
+
     # Analysis thresholds
-    cpu_peak_percentage = args.cpu_peak_percentage
+    cpu_peak_percentage = getattr(args, 'cpu_peak_percentage', None)
     if cpu_peak_percentage is None:
         cfg_val = _get_config_option(config, "analysis", "cpu_peak_percentage")
         cpu_peak_percentage = float(cfg_val) if cfg_val is not None else DEFAULT_CPU_PEAK_PERCENTAGE
-    ram_peak_percentage = args.ram_peak_percentage
+    ram_peak_percentage = getattr(args, 'ram_peak_percentage', None)
     if ram_peak_percentage is None:
         cfg_val = _get_config_option(config, "analysis", "ram_peak_percentage")
         ram_peak_percentage = float(cfg_val) if cfg_val is not None else DEFAULT_RAM_PEAK_PERCENTAGE
-    
-    # Collection-related options
-    process_name = args.process_name
-    process_id = args.process_id
-    program = args.program
-    sample_rate = args.sample_rate
-    
-    if not is_analysis_mode:
+
+    # Monitor options
+    program = getattr(args, 'program', None)
+    sample_rate = getattr(args, 'sample_rate', None)
+
+    if not is_analyze:
         if sample_rate is None:
             cfg_rate = _get_config_option(config, "collection", "sample_rate")
             sample_rate = float(cfg_rate) if cfg_rate is not None else DEFAULT_SAMPLE_RATE
     else:
-        # Analysis mode: collection sample-rate is not used, but keep a sane value
         if sample_rate is None:
             sample_rate = DEFAULT_SAMPLE_RATE
-    
+
     merged = argparse.Namespace(**vars(args))
-    merged.process_name = process_name
-    merged.process_id = process_id
     merged.program = program
     merged.sample_rate = sample_rate
     merged.cpu_peak_percentage = cpu_peak_percentage
@@ -1838,139 +1843,124 @@ def _resolve_effective_options(args: argparse.Namespace, config: Optional[dict])
 def main():
     """Main entry point."""
     args = parse_arguments()
-    
+
     # Merge config file with CLI options
     config_file = getattr(args, "config_file", None)
     if config_file is None:
         default_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.ini")
         if os.path.isfile(default_config):
             config_file = default_config
-            
+
     config_data = _load_config_file(config_file)
     args = _resolve_effective_options(args, config_data)
-    
-    # Validate effective sample rate (only relevant for collection mode, but harmless elsewhere)
-    if args.sample_rate is not None and args.sample_rate <= 0:
-        print("Error: --sample-rate must be a positive number", file=sys.stderr)
-        sys.exit(2)
 
-    # Convert RAM percentage to ratio
-    ram_peak_ratio = args.ram_peak_percentage / 100.0
+    if args.command == 'analyze':
+        ram_peak_ratio = args.ram_peak_percentage / 100.0
 
-    # Events Report Mode
-    if getattr(args, "events_report", None) is not None:
-        output_path = args.events_report if args.events_report else None
-        generate_events_report(output_path=output_path)
-        return
+        # Events Report
+        if getattr(args, "events_report", None) is not None:
+            output_path = args.events_report if args.events_report else None
+            generate_events_report(output_path=output_path)
+            return
 
-    # Analysis Mode - single file
-    if args.parse_file:
-        analyzer = DataAnalyzer(args.parse_file, cpu_peak_criteria=args.cpu_peak_percentage, ram_peak_criteria=ram_peak_ratio)
-        if not analyzer.load_data():
-            sys.exit(1)
-            
-        if args.summary:
-            analyzer.show_summary()
-            
-        if args.metrices_window:
-            analyzer.show_metrics_window()
-            
-        if not args.summary and not args.metrices_window:
-            print("Analysis mode selected but no action specified. Use --summary or --metrices-window.")
-        
-        return
-
-    # Analysis Mode - aggregate multiple CSV logs
-    if getattr(args, "aggregate_summaries", None):
-        expanded_paths = []
-        for p in args.aggregate_summaries:
-            matches = glob.glob(p)
-            if not matches:
-                if any(c in p for c in "*?["):
-                    print(f"Error: No files match pattern: {p}", file=sys.stderr)
-                else:
-                    print(f"Error: File not found: {p}", file=sys.stderr)
+        # Single file analysis
+        if args.parse_file:
+            analyzer = DataAnalyzer(args.parse_file, cpu_peak_criteria=args.cpu_peak_percentage, ram_peak_criteria=ram_peak_ratio)
+            if not analyzer.load_data():
                 sys.exit(1)
-            expanded_paths.extend(matches)
-        # Deduplicate while preserving order (same file from multiple patterns)
-        seen = set()
-        unique_paths = [x for x in expanded_paths if not (x in seen or seen.add(x))]
-        aggregate_summaries(
-            unique_paths,
-            cpu_peak_criteria=args.cpu_peak_percentage,
-            ram_peak_criteria=ram_peak_ratio,
-        )
-        return
+            if args.summary:
+                analyzer.show_summary()
+            if args.metrices_window:
+                analyzer.show_metrics_window()
+            if not args.summary and not args.metrices_window:
+                print("Analysis mode selected but no action specified. Use --summary or --metrices-window.")
+            return
 
-    # Data Collection Mode
-    nic_mac = _get_nic_mac_string()
-    if nic_mac is not None:
-        print(f"NIC MAC: {nic_mac}")
-    # Handle --program option: launch the program and get its process name
-    launched_process = None
-    process_name = args.process_name
-    process_id = args.process_id
-    
-    if args.program is not None:
-        if not args.program:
-            _pick_executable_and_write_launcher()
-        
-        try:
-            # Launch the program
-            # Don't redirect stdout/stderr for GUI applications to prevent blocking
-            # Set working directory to the executable's directory for resource loading
-            program_path = args.program[0] if args.program else None
-            cwd = os.path.dirname(os.path.abspath(program_path)) if program_path else None
-            
-            # Use Windows-specific flags to ensure GUI window appears
-            creation_flags = 0
-            if sys.platform == 'win32':
-                # CREATE_NEW_PROCESS_GROUP allows the process to run independently
-                # and ensures GUI windows are visible
-                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
-            
-            launched_process = subprocess.Popen(
-                args.program,
-                cwd=cwd,
-                creationflags=creation_flags,
-                # stdin=subprocess.DEVNULL, # Keep stdin/out for now unless requested otherwise
-                # stdout=subprocess.DEVNULL,
-                # stderr=subprocess.DEVNULL
+        # Aggregate multiple CSV logs
+        if getattr(args, "aggregate_summaries", None):
+            expanded_paths = []
+            for p in args.aggregate_summaries:
+                matches = glob.glob(p)
+                if not matches:
+                    if any(c in p for c in "*?["):
+                        print(f"Error: No files match pattern: {p}", file=sys.stderr)
+                    else:
+                        print(f"Error: File not found: {p}", file=sys.stderr)
+                    sys.exit(1)
+                expanded_paths.extend(matches)
+            # Deduplicate while preserving order (same file from multiple patterns)
+            seen = set()
+            unique_paths = [x for x in expanded_paths if not (x in seen or seen.add(x))]
+            aggregate_summaries(
+                unique_paths,
+                cpu_peak_criteria=args.cpu_peak_percentage,
+                ram_peak_criteria=ram_peak_ratio,
             )
-            
-            # Wait a bit for the process to initialize
-            time.sleep(3.0)
-            
-            if launched_process.poll() is not None:
-                print(f"Error: Program exited immediately with code {launched_process.returncode}.", file=sys.stderr)
+            return
+
+    elif args.command == 'monitor':
+        if args.sample_rate is not None and args.sample_rate <= 0:
+            print("Error: --sample-rate must be a positive number", file=sys.stderr)
+            sys.exit(2)
+
+        nic_mac = _get_nic_mac_string()
+        if nic_mac is not None:
+            print(f"NIC MAC: {nic_mac}")
+
+        launched_process = None
+        process_name = None
+        process_id = None
+
+        if args.program is not None:
+            if not args.program:
+                _pick_executable_and_write_launcher()
+
+            try:
+                program_path = args.program[0] if args.program else None
+                cwd = os.path.dirname(os.path.abspath(program_path)) if program_path else None
+
+                # Use Windows-specific flags to ensure GUI window appears
+                creation_flags = 0
+                if sys.platform == 'win32':
+                    creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+                launched_process = subprocess.Popen(
+                    args.program,
+                    cwd=cwd,
+                    creationflags=creation_flags,
+                )
+
+                # Wait a bit for the process to initialize
+                time.sleep(3.0)
+
+                if launched_process.poll() is not None:
+                    print(f"Error: Program exited immediately with code {launched_process.returncode}.", file=sys.stderr)
+                    sys.exit(1)
+
+                process_id = launched_process.pid
+
+                # Infer process name from program path for logging purposes
+                if not process_name and program_path:
+                    process_name = os.path.splitext(os.path.basename(program_path))[0]
+
+                print(f"Launched program with PID: {process_id}")
+
+            except Exception as e:
+                print(f"Error launching program: {e}", file=sys.stderr)
                 sys.exit(1)
-            
-            process_id = launched_process.pid
-            
-            # Infer process name from program path for logging purposes
-            if not process_name and program_path:
-                 # Use stem of the filename (no extension) per user spec
-                 process_name = os.path.splitext(os.path.basename(program_path))[0]
-                 
-            print(f"Launched program with PID: {process_id}")
-            
-        except Exception as e:
-            print(f"Error launching program: {e}", file=sys.stderr)
+
+        app = DataCollector(
+            process_name=process_name,
+            process_id=process_id,
+            sample_rate=args.sample_rate
+        )
+
+        app.launched_process = launched_process
+
+        success = app.run()
+
+        if not success:
             sys.exit(1)
-    
-    # Initialize Monitor (now DataCollector)
-    app = DataCollector(
-        process_name=process_name,
-        process_id=process_id,
-        sample_rate=args.sample_rate
-    )
-    
-    app.launched_process = launched_process
-    
-    success = app.run()
-    
-    if not success:
-        sys.exit(1)
 
 if __name__ == '__main__':
     try:

@@ -32,8 +32,8 @@ def clean_up_csvs(pattern="*_monitor.csv"):
             pass
 
 def path_1_system_wide():
-    print("Testing Path 1: System-wide monitoring (no args)...")
-    cmd = [sys.executable, JASTM_PY, "--sample-rate", "0.5"]
+    print("Testing Path 1: System-wide monitoring...")
+    cmd = [sys.executable, JASTM_PY, "monitor", "--sample-rate", "0.5"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
     time.sleep(3)
@@ -54,14 +54,12 @@ def path_1_system_wide():
     print_result("Path 1: System-wide monitoring", success, f"Log: {csv_file}" if success else "CSV not found or empty")
     return success
 
-def path_2_process_name():
-    print("Testing Path 2: Monitoring by process name (python.exe)...")
-    # Using python.exe or python depending on OS, but README says "python.exe" for example.
-    # We'll use the current process name.
-    proc_name = os.path.basename(sys.executable)
-    cmd = [sys.executable, JASTM_PY, "--process-name", proc_name, "--sample-rate", "0.5"]
+def path_2_monitor_with_sample_rate():
+    print("Testing Path 2: monitor --program with custom sample rate...")
+    cmd = [sys.executable, JASTM_PY, "monitor", "--program",
+           sys.executable, "-c", "import time; time.sleep(6)", "--sample-rate", "0.5"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    
+
     time.sleep(3)
     proc.terminate()
     try:
@@ -69,16 +67,17 @@ def path_2_process_name():
     except:
         proc.kill()
         stdout, stderr = proc.communicate()
-    
-    csv_file = find_recent_csv(name_contains=proc_name.split('.')[0] if '.' in proc_name else proc_name)
+
+    proc_name = os.path.splitext(os.path.basename(sys.executable))[0]
+    csv_file = find_recent_csv(name_contains=proc_name, within_seconds=15)
     success = csv_file is not None
-    print_result("Path 2: Monitoring by process name", success, f"Log: {csv_file}" if success else "CSV not found")
+    print_result("Path 2: monitor --program with sample rate", success, f"Log: {csv_file}" if success else "CSV not found")
     return success
 
 def path_3_launch_program():
     print("Testing Path 3: Launch and monitor program...")
     # Use python to sleep for 5 seconds (must be > 3s because jastm.py waits 3s before checking if proc is alive)
-    cmd = [sys.executable, "-u", JASTM_PY, "--program", sys.executable, "-c", "import time; time.sleep(5)"]
+    cmd = [sys.executable, "-u", JASTM_PY, "monitor", "--program", sys.executable, "-c", "import time; time.sleep(5)"]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
     success = result.returncode == 0
@@ -93,7 +92,7 @@ def path_3_launch_program():
 
 def path_4_analysis_summary():
     print("Testing Path 4: Analysis mode (summary)...")
-    cmd = [sys.executable, "-u", JASTM_PY, "--parse-file", SAMPLE_CSV, "--summary"]
+    cmd = [sys.executable, "-u", JASTM_PY, "analyze", "--parse-file", SAMPLE_CSV, "--summary"]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
     # Actual output uses "Duration:" and "CPU Stats:"
@@ -103,7 +102,7 @@ def path_4_analysis_summary():
 
 def path_5_aggregate_summaries():
     print("Testing Path 5: Aggregate summaries...")
-    cmd = [sys.executable, JASTM_PY, "--aggregate-summaries", SAMPLE_CSV, SAMPLE_CSV]
+    cmd = [sys.executable, JASTM_PY, "analyze", "--aggregate-summaries", SAMPLE_CSV, SAMPLE_CSV]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
     success = result.returncode == 0 and "Aggregated Summary Report" in result.stdout and "|" in result.stdout
@@ -114,7 +113,7 @@ def list_items():
     print("--- JASTM Happy Path Test Items ---")
     items = [
         ("Path 1: System-wide monitoring", "Run jastm.py with no args.", "A *_monitor.csv is created and populated with data."),
-        ("Path 2: Monitoring by process name", "Run jastm.py with --process-name python.exe.", "A <process>_*_monitor.csv is created and populated."),
+        ("Path 2: monitor --program with sample rate", "Run jastm.py monitor --program python -c '...' --sample-rate 0.5.", "A <program>_*_monitor.csv is created."),
         ("Path 3: Launch and monitor program", "Run jastm.py with --program.", "JASTM successfully launches the program, logs to a CSV, and exits 0."),
         ("Path 4: Analysis mode (summary)", "Run jastm.py with --parse-file <csv> --summary.", "Prints a textual summary with Duration and CPU Stats, exits 0."),
         ("Path 5: Aggregate summaries", "Run jastm.py with --aggregate-summaries <csv1> <csv2>.", "Prints a Markdown table with 'Aggregated Summary Report'.")
@@ -143,7 +142,7 @@ def main():
     
     try:
         results.append(path_1_system_wide())
-        results.append(path_2_process_name())
+        results.append(path_2_monitor_with_sample_rate())
         results.append(path_3_launch_program())
         results.append(path_4_analysis_summary())
         results.append(path_5_aggregate_summaries())
