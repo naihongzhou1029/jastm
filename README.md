@@ -177,6 +177,76 @@ Empty or commented-out values are treated as not set. Process targeting (`--prog
 - **Metrics window**: Chart of elapsed time vs. scaled CPU (×20) and available memory (MB); scatter overlay for CPU (red) and memory (orange) peaks; zoom (scroll), hover (interpolated values), arrow-key cursor; average CPU and average memory labels on the right.
 ![The Metrics Window](images/matrices_window.png)
 
+## Multi-Monitor Configurator (`mmc.py`)
+
+`mmc.py` is a companion utility for configuring display topology and per-monitor resolution on Windows 10 IoT systems with multiple screens.
+
+### Requirements
+
+- Windows 10 (Win32 only)
+- No additional Python packages — uses only `ctypes` (stdlib)
+
+### Usage
+
+```bash
+python mmc.py --config-file mmc.ini
+python mmc.py --config-file mmc.ini --verbose   # print window-move diagnostic table
+```
+
+### Config file (`mmc.ini`)
+
+`mmc.ini` has two kinds of sections:
+
+**`[display]`** — controls the Windows *Multiple Displays* topology:
+
+| Key | Values | Description |
+|-----|--------|-------------|
+| `topology` | `extend` *(default)* | Extend desktop across all monitors |
+| | `clone` | Duplicate the desktop on every monitor ("Duplicate Desktop on 1 and 2 / 1 and 3 / …") |
+| | `internal` | Show only on the built-in / primary display ("PC screen only") |
+| | `external` | Show only on the first external display ("Second screen only") |
+
+When `topology` is anything other than `extend`, the `[monitorN]` sections are ignored — Windows sets resolutions automatically after the topology switch.
+
+**`[monitorN]`** — per-monitor settings (used only when `topology = extend`):
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `resolution` | `WIDTHxHEIGHT` in pixels | `1920x1080` |
+| `refresh_rate` | Target Hz; automatically downgraded if not supported | `60` |
+| `primary` | `true` for the monitor that hosts the taskbar. Exactly one section must be `true`. | `false` |
+| `move_windows_to` | `true` to collect all open windows onto this monitor after apply. At most one section may be `true`. | `false` |
+
+Monitors are assigned in the order Windows enumerates display adapters — the same order shown in **Settings → System → Display → Identify**.
+
+Example `mmc.ini`:
+
+```ini
+[display]
+topology = extend          # or: clone / internal / external
+
+[monitor1]
+resolution   = 1920x1080
+refresh_rate = 60
+primary      = false
+move_windows_to = true
+
+[monitor2]
+resolution   = 1920x1080
+refresh_rate = 60
+primary      = false
+
+[monitor3]
+resolution   = 3840x2160
+refresh_rate = 60
+primary      = true
+```
+
+### What `mmc.py` does
+
+1. **Topology switch** (`clone` / `internal` / `external`): calls the Windows `SetDisplayConfig` API with the corresponding topology flag, then moves all open windows to the primary monitor.
+2. **Extend mode**: resolves the best available mode for each monitor (downgrades resolution/refresh rate if the exact target is unsupported), positions monitors side-by-side with the primary at the virtual-desktop origin `(0, 0)`, commits all changes via `ChangeDisplaySettingsEx`, and moves open windows to the monitor marked `move_windows_to` (or the primary if none is marked).
+
 ## Testing
 
 JASTM includes an automated testing suite under the `tests/` directory to ensure all features work reliably without regressions.
