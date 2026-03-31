@@ -51,12 +51,59 @@ SDC_TOPOLOGY_EXTEND   = 0x00000004
 SDC_TOPOLOGY_EXTERNAL = 0x00000008
 SDC_APPLY             = 0x00000080
 SDC_SAVE_TO_DATABASE  = 0x00000200
+SDC_ALLOW_PATH_ORDER_CHANGES = 0x00000400
+SDC_USE_SUPPLIED_DISPLAY_CONFIG = 0x00000020
+
+QDC_ALL_PATHS = 0x00000001
+QDC_ONLY_ACTIVE_PATHS = 0x00000002
 
 _TOPOLOGY_SDC_FLAGS = {
     'clone':    SDC_TOPOLOGY_CLONE,
     'internal': SDC_TOPOLOGY_INTERNAL,
     'external': SDC_TOPOLOGY_EXTERNAL,
 }
+
+# -- CCD API structures --------------------------------------------------------
+
+class LUID(ctypes.Structure):
+    _fields_ = [('LowPart', ctypes.c_uint32), ('HighPart', ctypes.c_int32)]
+
+
+class DISPLAYCONFIG_RATIONAL(ctypes.Structure):
+    _fields_ = [('Numerator', ctypes.c_uint32), ('Denominator', ctypes.c_uint32)]
+
+
+class DISPLAYCONFIG_PATH_SOURCE_INFO(ctypes.Structure):
+    _fields_ = [
+        ('adapterId',  LUID),
+        ('id',         ctypes.c_uint32),
+        ('modeInfoIdx', ctypes.c_uint32),
+        ('statusFlags', ctypes.c_uint32),
+    ]
+
+
+class DISPLAYCONFIG_PATH_TARGET_INFO(ctypes.Structure):
+    _fields_ = [
+        ('adapterId',        LUID),
+        ('id',               ctypes.c_uint32),
+        ('modeInfoIdx',      ctypes.c_uint32),
+        ('outputTechnology', ctypes.c_uint32),
+        ('rotation',         ctypes.c_uint32),
+        ('scaling',          ctypes.c_uint32),
+        ('refreshRate',      DISPLAYCONFIG_RATIONAL),
+        ('scanLineOrdering', ctypes.c_uint32),
+        ('targetAvailable',  ctypes.c_bool),
+        ('statusFlags',      ctypes.c_uint32),
+    ]
+
+
+class DISPLAYCONFIG_PATH_INFO(ctypes.Structure):
+    _fields_ = [
+        ('sourceInfo', DISPLAYCONFIG_PATH_SOURCE_INFO),
+        ('targetInfo', DISPLAYCONFIG_PATH_TARGET_INFO),
+        ('flags',      ctypes.c_uint32),
+    ]
+
 SWP_NOZORDER     = 0x0004
 SWP_NOACTIVATE   = 0x0010
 HWND_TOP         = 0
@@ -470,20 +517,70 @@ def _move_windows_to_target(target_rect, verbose=False):
 
 # -- Topology helpers ----------------------------------------------------------
 
-def _apply_topology(topology):
-    """Switch the display topology via SetDisplayConfig (non-extend modes only).
+class DISPLAYCONFIG_MODE_INFO(ctypes.Structure):
+    # This is a simplified version of the union; since we mostly pass it back,
+    # we just need the size to be correct (64 bytes).
+    _fields_ = [
+        ('infoType', ctypes.c_uint32),
+        ('id',       ctypes.c_uint32),
+        ('adapterId', LUID),
+        ('payload',  ctypes.c_uint8 * 48),
+    ]
 
-    *topology* must be one of 'clone', 'internal', or 'external'.
-    Returns the LONG result code (0 = ERROR_SUCCESS).
+
+def _apply_clone_topology_ccd():
     """
+    Force a 'Duplicate' (Clone) topology across ALL active monitors using the
+    CCD API. This ensures Windows Settings shows 'Duplicate these displays'.
+    """
+    _user32.GetDisplayConfigBufferSizes.argtypes = [
+        ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)
+    ]
+    _user32.QueryDisplayConfig.argtypes = [
+        ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(DISPLAYCONFIG_PATH_INFO),
+        ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(DISPLAYCONFIG_MODE_INFO),
+        ctypes.POINTER(ctypes.c_uint32)
+    ]
+
+    n_paths = ctypes.c_uint32()
+    n_modes = ctypes.c_uint32()
+    _user32.GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, ctypes.byref(n_paths), ctypes.byref(n_modes))
+
+    paths = (DISPLAYCONFIG_PATH_INFO * n_paths.value)()
+    modes = (DISPLAYCONFIG_MODE_INFO * n_modes.value)()
+    _user32.QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, ctypes.byref(n_paths), paths,
+                               ctypes.byref(n_modes), modes, None)
+
+    if n_paths.value < 2:
+        return 0 # Nothing to clone
+
+    # Pick the source from the first active path as the 'master' source.
+    master_source_id = paths[0].sourceInfo.id
+    master_source_mode_idx = paths[0].sourceInfo.modeInfoIdx
+
+    for i in range(n_paths.value):
+        paths[i].sourceInfo.id = master_source_id
+        paths[i].sourceInfo.modeInfoIdx = master_source_mode_idx
+        paths[i].flags = 0x00000001 # DISPLAYCONFIG_PATH_ACTIVE
+
+    flags = SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_PATH_ORDER_CHANGES | SDC_SAVE_TO_DATABASE
+    return _user32.SetDisplayConfig(n_paths.value, paths, n_modes.value, modes, flags)
+
+
+def _apply_topology(topology):
+    """Switch the display topology via SetDisplayConfig."""
+    if topology == 'clone':
+        return _apply_clone_topology_ccd()
+
     _user32.SetDisplayConfig.restype  = ctypes.c_long
     _user32.SetDisplayConfig.argtypes = [
         ctypes.c_uint32, ctypes.c_void_p,
         ctypes.c_uint32, ctypes.c_void_p,
         ctypes.c_uint32,
     ]
-    flags = _TOPOLOGY_SDC_FLAGS[topology] | SDC_APPLY | SDC_SAVE_TO_DATABASE
+    flags = _TOPOLOGY_SDC_FLAGS[topology] | SDC_APPLY | SDC_ALLOW_PATH_ORDER_CHANGES | SDC_SAVE_TO_DATABASE
     return _user32.SetDisplayConfig(0, None, 0, None, flags)
+
 
 
 # -- Config parsing ------------------------------------------------------------
@@ -576,20 +673,17 @@ def main():
         sys.exit(f"Error: No [monitor*] sections found in {args.config_file!r}")
 
     # -- Non-extend topologies: delegate entirely to SetDisplayConfig ----------
-    if topology != 'extend':
+    if topology in ('internal', 'external', 'clone'):
         print(f"Applying display topology: {topology}...")
         code = _apply_topology(topology)
         ok   = (code == 0)
         print(f"  SetDisplayConfig '{topology}': "
               f"{'OK' if ok else f'FAILED (code {code})'}")
 
-        print("\nMoving running windows to primary monitor...")
-        n = _move_windows_to_target(_get_primary_rect(), verbose=args.verbose)
-        print(f"Moved {n} window(s).")
         print("Done.")
         sys.exit(0 if ok else 1)
 
-    # -- Extend topology: validate [monitorN] sections -------------------------
+    # -- Extend/Clone topology: validate [monitorN] sections -------------------
     n_primary = sum(1 for m in monitors if m['primary'])
     if n_primary != 1:
         sys.exit(
@@ -625,35 +719,77 @@ def main():
 
     # -- Resolve best mode for each display -----------------------------------
     resolved = []
+
+    # If cloning, try to find a resolution that ALL monitors support.
+    best_common = None
+    if topology == 'clone':
+        target_w = monitors[primary_idx]['width']
+        target_h = monitors[primary_idx]['height']
+        target_f = monitors[primary_idx]['freq']
+
+        # Intersect the mode sets of all active displays
+        all_modes_sets = []
+        for device in displays:
+            modes_list = _enumerate_modes(device)
+            if modes_list:
+                all_modes_sets.append(set(modes_list))
+
+        if all_modes_sets:
+            common_modes = set.intersection(*all_modes_sets)
+            if common_modes:
+                # Find the best mode within the common set
+                best_common = _find_best_mode(sorted(common_modes, reverse=True),
+                                              target_w, target_h, target_f)
+                print(f"  Cloning topology: using shared resolution {best_common[0]}x{best_common[1]}@{best_common[2]}Hz")
+            else:
+                print("  Warning: No shared resolution found for all monitors. Cloning may be imperfect.")
+
     for i, (device, cfg) in enumerate(zip(displays, monitors)):
         modes = _enumerate_modes(device)
         if not modes:
             sys.exit(f"Error: Could not enumerate modes for display {i + 1} ({device!r})")
-        best = _find_best_mode(modes, cfg['width'], cfg['height'], cfg['freq'])
+        
+        if topology == 'clone' and best_common:
+            best = best_common
+            t_str = f"shared {best[0]}x{best[1]}@{best[2]}Hz"
+        else:
+            best = _find_best_mode(modes, cfg['width'], cfg['height'], cfg['freq'])
+            t_str = f"{cfg['width']}x{cfg['height']}@{cfg['freq']}Hz"
+
         if best is None:
             sys.exit(f"Error: No usable mode found for display {i + 1} ({device!r})")
-        target = (cfg['width'], cfg['height'], cfg['freq'])
-        if best == target:
+        
+        # Check if we got exactly what the config (or common logic) wanted
+        if topology == 'clone' and best_common:
+            exact = (best == best_common)
+        else:
+            exact = (best == (cfg['width'], cfg['height'], cfg['freq']))
+
+        if exact:
             print(f"  Display {i + 1}: {best[0]}x{best[1]}@{best[2]}Hz  (exact match)")
         else:
             print(
-                f"  Display {i + 1}: {target[0]}x{target[1]}@{target[2]}Hz "
+                f"  Display {i + 1}: {t_str} "
                 f"not available -> using {best[0]}x{best[1]}@{best[2]}Hz"
             )
         resolved.append({'device': device, 'mode': best, 'primary': cfg['primary'],
                          'move_windows_to': cfg['move_windows_to']})
 
     # -- Compute monitor positions ---------------------------------------------
-    # Primary monitor is placed at the virtual-desktop origin (0, 0).
-    # Non-primary monitors are tiled to the right of the primary in config order.
-    primary_w = resolved[primary_idx]['mode'][0]
-    x_cursor  = primary_w
-    for r in resolved:
-        if r['primary']:
+    if topology == 'clone':
+        for r in resolved:
             r['pos'] = (0, 0)
-        else:
-            r['pos'] = (x_cursor, 0)
-            x_cursor += r['mode'][0]
+    else:
+        # Primary monitor is placed at the virtual-desktop origin (0, 0).
+        # Non-primary monitors are tiled to the right of the primary in config order.
+        primary_w = resolved[primary_idx]['mode'][0]
+        x_cursor  = primary_w
+        for r in resolved:
+            if r['primary']:
+                r['pos'] = (0, 0)
+            else:
+                r['pos'] = (x_cursor, 0)
+                x_cursor += r['mode'][0]
 
     # -- Apply display settings ------------------------------------------------
     print("\nApplying display settings...")
@@ -680,19 +816,22 @@ def main():
 
     # -- Move windows to target monitor ----------------------------------------
     # Use the monitor marked move_windows_to; fall back to primary.
-    move_targets = [r for r in resolved if r['move_windows_to']]
-    if move_targets:
-        tgt = move_targets[0]
-    else:
-        tgt = resolved[primary_idx]
-    tgt_x, tgt_y = tgt['pos']
-    tgt_w, tgt_h = tgt['mode'][0], tgt['mode'][1]
-    target_rect = (tgt_x, tgt_y, tgt_x + tgt_w, tgt_y + tgt_h)
+    # This implementation is applied ONLY when topology is 'extend'.
+    if topology == 'extend':
+        move_targets = [r for r in resolved if r['move_windows_to']]
+        if move_targets:
+            tgt = move_targets[0]
+        else:
+            tgt = resolved[primary_idx]
+        tgt_x, tgt_y = tgt['pos']
+        tgt_w, tgt_h = tgt['mode'][0], tgt['mode'][1]
+        target_rect = (tgt_x, tgt_y, tgt_x + tgt_w, tgt_y + tgt_h)
 
-    label = 'move_windows_to' if move_targets else 'primary'
-    print(f"\nMoving running windows to {label} monitor...")
-    n = _move_windows_to_target(target_rect, verbose=args.verbose)
-    print(f"Moved {n} window(s).")
+        label = 'move_windows_to' if move_targets else 'primary'
+        print(f"\nMoving running windows to {label} monitor...")
+        n = _move_windows_to_target(target_rect, verbose=args.verbose)
+        print(f"Moved {n} window(s).")
+    
     print("Done.")
 
     sys.exit(0 if all_ok else 1)
