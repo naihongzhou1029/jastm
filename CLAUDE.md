@@ -26,34 +26,45 @@ python tests/smoke_test.py --list-items
 # Install Python dependencies (auto-installed on first run, but can be done manually)
 pip install psutil matplotlib
 
-# Run jastm directly
+# Run jastm directly (uses subcommands: monitor, analyze)
 python jastm.py --help
-python jastm.py --parse-file <csv> --summary
-python jastm.py --aggregate-summaries run1.csv run2.csv
+python jastm.py monitor
+python jastm.py monitor --program myapp.exe arg1 arg2
+python jastm.py analyze --parse-file <csv> --summary
+python jastm.py analyze --aggregate-summaries run1.csv run2.csv
+python jastm.py analyze --events-report              # Windows only
+python jastm.py analyze --events-report my_report.md  # custom output path
+
+# Run mmc.py (Windows-only multi-monitor configurator)
+python mmc.py --config-file mmc.ini
+python mmc.py --config-file mmc.ini --verbose
 ```
 
 There is no build step, linter config, or formatter configured in this project.
 
 ## Architecture
 
-The entire application lives in a single file: `jastm.py`. There are no packages or modules beyond it.
+The main application lives in `jastm.py`. A companion utility `mmc.py` handles Windows multi-monitor configuration. There are no packages or modules beyond these two standalone scripts.
 
-### Two runtime modes
+### Two subcommands
 
-**Collection mode** (default): samples CPU and memory on an interval, writes rows to a timestamped `*_monitor.csv` file, and stops when the process exits or after 10 consecutive metric failures. The `DataCollector` class owns this path. Its `run()` method is headless; the `setup_gui()` method exists but is unused in the current active code path.
+**`monitor`** (collection mode): samples CPU and memory on an interval, writes rows to a timestamped `*_monitor.csv` file, and stops when the process exits or after 10 consecutive metric failures. The `DataCollector` class owns this path. Its `run()` method is headless; the `setup_gui()` method exists but is unused in the current active code path.
 
-**Analysis mode** (`--parse-file` or `--aggregate-summaries`): reads one or more existing CSVs and produces a text summary and/or an interactive chart. The `DataAnalyzer` class owns this path.
+**`analyze`** (analysis mode): reads one or more existing CSVs and produces a text summary, interactive chart, aggregated table, or Windows Event Log report. The `DataAnalyzer` class owns the `--parse-file` path; `aggregate_summaries()` handles `--aggregate-summaries`; `--events-report` generates a Markdown file from Windows Event Log entries (Warning/Error/Critical from System and Application channels, last 24 hours).
+
+Running `python jastm.py` with no subcommand prints help and exits.
 
 ### Key data flow
 
 ```
-parse_arguments()
+parse_arguments()          ← argparse with "monitor" and "analyze" subcommands
   └─ _resolve_effective_options()   ← merges CLI + config.ini values
        └─ main()
-            ├─ DataCollector.run()         (collection mode)
-            ├─ DataAnalyzer + show_summary()  (--parse-file --summary)
-            ├─ DataAnalyzer + show_metrics_window()  (--parse-file --metrices-window)
-            └─ aggregate_summaries()       (--aggregate-summaries)
+            ├─ DataCollector.run()                (monitor)
+            ├─ DataAnalyzer + show_summary()      (analyze --parse-file --summary)
+            ├─ DataAnalyzer + show_metrics_window()  (analyze --parse-file --metrices-window)
+            ├─ aggregate_summaries()              (analyze --aggregate-summaries)
+            └─ events report generation           (analyze --events-report)
 ```
 
 ### Config file merging
@@ -90,9 +101,8 @@ Analysis also computes a linear regression of `Memory_MB` over elapsed time, rep
 
 ### CLI mutual exclusions
 
-- `--parse-file` and `--aggregate-summaries` cannot be used together.
-- `--parse-file` / `--aggregate-summaries` cannot be combined with `--process-name`, `--process-id`, or `--program`.
-- `--process-name`, `--process-id`, and `--program` are mutually exclusive (only one process target at a time).
+- Under `analyze`: `--parse-file`, `--aggregate-summaries`, and `--events-report` are in a mutually exclusive group — exactly one is required.
+- `--summary` and `--metrices-window` require `--parse-file`.
 
 ### Machine ID inference (aggregate mode)
 
@@ -136,3 +146,12 @@ tests/
 | tkinter unavailable | `"tkinter"` in stderr |
 | Collection started | `"Logging to:"` |
 | Machine ID | `"Machine ID: NNNN"` |
+
+### `mmc.py` — Multi-Monitor Configurator
+
+A standalone Windows-only script (no third-party dependencies, uses `ctypes` only) for configuring display topology and per-monitor resolution. Configured via `mmc.ini`.
+
+- **Topology modes**: `extend` (default), `clone`, `internal`, `external`. Non-extend topologies call `SetDisplayConfig` API directly; per-monitor `[monitorN]` sections are ignored.
+- **Extend mode**: resolves best available mode per monitor (auto-downgrades resolution/refresh if unsupported), positions monitors side-by-side with primary at `(0, 0)`, commits via `ChangeDisplaySettingsEx`.
+- **Window migration**: `move_windows_to = true` on a `[monitorN]` section moves all open windows to that monitor after apply. Shell windows (`Shell_TrayWnd`, `Progman`, etc.) are excluded via `_SKIP_CLASSES`.
+- `mmc.py` has no test suite currently.
